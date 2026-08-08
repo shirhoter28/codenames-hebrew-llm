@@ -1,0 +1,25 @@
+# Core (M1)
+requests>=2.31
+python-dotenv>=1.0
+pyyaml>=6.0
+pydantic>=2.6
+tenacity>=8.2
+pandas>=2.2
+numpy>=1.26
+tqdm>=4.66
+
+# Testing
+pytest>=8.0
+pytest-mock>=3.12
+
+# Analysis notebooks
+jupyter>=1.0
+matplotlib>=3.8
+seaborn>=0.13
+plotly>=5.20
+
+# Embedding baselines (M4) — uncomment when starting that milestone
+# gensim>=4.3
+# sentence-transformers>=2.6
+# transformers>=4.40
+# torch>=2.2
