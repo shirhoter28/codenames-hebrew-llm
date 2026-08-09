@@ -172,6 +172,61 @@ def test_llm_codemaster_accepts_empty_intended_targets():
     assert codemaster.give_clue(_board())["intended_targets"] == []
 
 
+# --- Fix 7: duplicate intended_targets are rejected (mirrors Fix 4 for guesses) ---
+
+
+def _board_two_targets() -> Board:
+    return Board(
+        seed=1,
+        words=["ירח", "שמש", "ג", "ד"],
+        roles={"ירח": "target", "שמש": "target", "ג": "civilian", "ד": "assassin"},
+    )
+
+
+def test_llm_codemaster_retries_on_duplicate_intended_targets_then_succeeds():
+    client = FakeClient(
+        [
+            {
+                "clue": "אור",
+                "count": 1,
+                "intended_targets": ["ירח", "ירח"],
+                "reasoning": "r",
+            },
+            {
+                "clue": "אור",
+                "count": 2,
+                "intended_targets": ["ירח", "שמש"],
+                "reasoning": "r",
+            },
+        ]
+    )
+    codemaster = LLMCodemaster(client=client, model="m", method="strong_hebrew")
+
+    result = codemaster.give_clue(_board_two_targets())
+
+    assert result["intended_targets"] == ["ירח", "שמש"]
+    assert len(client.calls) == 2
+
+
+def test_llm_codemaster_gives_up_on_duplicate_intended_targets_and_names_them():
+    bad = {
+        "clue": "אור",
+        "count": 1,
+        "intended_targets": ["ירח", "ירח"],
+        "reasoning": "r",
+    }
+    client = FakeClient([bad, bad, bad])
+    codemaster = LLMCodemaster(
+        client=client, model="m", method="strong_hebrew", max_retries=3
+    )
+
+    with pytest.raises(FormatFailure) as excinfo:
+        codemaster.give_clue(_board_two_targets())
+
+    assert "duplicate intended_targets" in str(excinfo.value)
+    assert len(client.calls) == 3
+
+
 # --- Fix 4: duplicate guesses are rejected ---
 
 

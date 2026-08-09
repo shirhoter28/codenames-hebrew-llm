@@ -42,6 +42,10 @@ class LLMCodemaster:
                 invalid = [w for w in response.intended_targets if w not in target_words]
                 if invalid:
                     raise ValueError(f"intended_targets not on board: {invalid}")
+                # A duplicate entry silently halves intended_recall for that
+                # trial even though the model only meant to name one word.
+                if len(set(response.intended_targets)) != len(response.intended_targets):
+                    raise ValueError(f"duplicate intended_targets: {response.intended_targets}")
                 return asdict(response)
             except (FormatFailure, ValueError) as exc:
                 last_error = exc
