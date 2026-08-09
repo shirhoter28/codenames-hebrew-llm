@@ -69,7 +69,8 @@ def test_target_recovery_rate_falls_back_to_intended_targets_when_count_zero():
         _board(), count=0, intended_targets=["t1", "t2"], guesses=["t1", "t2", "t3"]
     )
 
-    assert result["target_recovery_rate"] == 1.0
+    # All 3 targets guessed / 2 intended targets = 1.5 (game-outcome metric, not intent-aware)
+    assert result["target_recovery_rate"] == 1.5
 
 
 def test_target_recovery_rate_is_none_when_count_zero_and_no_intended_targets():
