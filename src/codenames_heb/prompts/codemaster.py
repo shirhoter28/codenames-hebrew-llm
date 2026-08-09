@@ -109,7 +109,7 @@ def parse_codemaster_response(data: dict) -> CodemasterResponse:
     return CodemasterResponse(
         clue=data["clue"].strip(),
         count=data["count"],
-        intended_targets=list(data["intended_targets"]),
+        intended_targets=[str(word).strip() for word in data["intended_targets"]],
         reasoning=str(data.get("reasoning", "")),
         translation_map=data.get("translation_map"),
         en_clue=data.get("en_clue"),

@@ -115,3 +115,18 @@ def test_validate_clue_legality_rejects_multi_word_clue():
 def test_validate_clue_legality_rejects_clue_already_on_board():
     with pytest.raises(ValueError):
         validate_clue_legality("א", _board())
+
+
+def test_parse_codemaster_response_strips_whitespace_from_intended_targets():
+    # Guesses are stripped in parse_guesser_response; intended_targets must be
+    # stripped the same way or exact-string matching between them silently breaks.
+    response = parse_codemaster_response(
+        {
+            "clue": "אור",
+            "count": 2,
+            "intended_targets": ["  ירח ", "\nשמש\t"],
+            "reasoning": "r",
+        }
+    )
+
+    assert response.intended_targets == ["ירח", "שמש"]
