@@ -29,6 +29,7 @@ def main(
         ),
         make_guesser=lambda model: LLMGuesser(client=client, model=model),
         results_dir=results_dir,
+        config_path=config_path,
     )
     print(f"Results written to {run_dir}")
     return run_dir
