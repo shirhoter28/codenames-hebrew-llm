@@ -57,7 +57,11 @@ class LLMGuesser:
         for _ in range(self.max_retries):
             try:
                 data = self.client.complete_json(self.model, system, user, max_retries=1)
-                return parse_guesser_response(data)
+                guesses = parse_guesser_response(data)
+                invalid = [g for g in guesses if g not in words]
+                if invalid:
+                    raise ValueError(f"guesses not on board: {invalid}")
+                return guesses
             except (FormatFailure, ValueError) as exc:
                 last_error = exc
                 continue

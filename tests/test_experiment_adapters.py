@@ -93,6 +93,21 @@ def test_llm_guesser_returns_parsed_guesses():
     assert result == ["ירח", "ב"]
 
 
+def test_llm_guesser_retries_when_guess_is_not_on_board_then_succeeds():
+    client = FakeClient(
+        [
+            {"guesses": ["not_on_board"]},
+            {"guesses": ["ירח"]},
+        ]
+    )
+    guesser = LLMGuesser(client=client, model="m")
+
+    result = guesser.guess(["ירח", "ב", "ג"], clue="אור", count=1)
+
+    assert result == ["ירח"]
+    assert len(client.calls) == 2
+
+
 def test_llm_guesser_raises_format_failure_after_retries():
     client = FakeClient([FormatFailure("bad"), FormatFailure("bad"), FormatFailure("bad")])
     guesser = LLMGuesser(client=client, model="m", max_retries=3)
