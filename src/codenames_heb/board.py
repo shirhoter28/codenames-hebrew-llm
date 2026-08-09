@@ -1,5 +1,6 @@
 import random
 from dataclasses import dataclass
+from types import MappingProxyType
 
 ROLE_COUNTS: dict[str, int] = {
     "target": 9,
@@ -12,8 +13,12 @@ ROLE_COUNTS: dict[str, int] = {
 @dataclass(frozen=True)
 class Board:
     seed: int
-    words: list[str]
-    roles: dict[str, str]
+    words: tuple[str, ...]
+    roles: MappingProxyType
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "words", tuple(self.words))
+        object.__setattr__(self, "roles", MappingProxyType(dict(self.roles)))
 
     def role_of(self, word: str) -> str:
         return self.roles[word]

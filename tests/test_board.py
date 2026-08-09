@@ -48,3 +48,11 @@ def test_generate_board_differs_for_different_seed():
 def test_generate_board_raises_when_pool_too_small():
     with pytest.raises(ValueError):
         generate_board(_pool(10), seed=1)
+
+
+def test_board_words_and_roles_are_genuinely_immutable():
+    board = generate_board(_pool(), seed=1)
+
+    assert isinstance(board.words, tuple)
+    with pytest.raises(TypeError):
+        board.roles["word0"] = "target"
