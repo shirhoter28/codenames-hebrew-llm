@@ -73,7 +73,7 @@ clue. Then translate that English clue into one Hebrew word for your
 final answer.
 {required_count_line}
 Respond with JSON only: {{"clue": "...", "count": <int>,
-"intended_targets": ["..."], "reasoning": "...",
+"intended_targets": ["..."], "reasoning": "one sentence",
 "translation_map": {{"he_word": "en_word", ...}},
 "en_clue": "...", "en_targets": ["..."]}}"""
 

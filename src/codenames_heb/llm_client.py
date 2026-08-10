@@ -76,6 +76,7 @@ class OpenRouterClient:
                     {"role": "user", "content": user_prompt},
                 ],
                 "max_tokens": self.max_tokens,
+                "reasoning": {"enabled": False},
             },
             timeout=60,
         )
