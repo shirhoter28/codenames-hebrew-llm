@@ -1,5 +1,3 @@
-from codenames_heb.board import Board
-
 _OUTCOME_BY_ROLE = {
     "opponent": "hit_opponent",
     "civilian": "hit_civilian",
@@ -7,30 +5,20 @@ _OUTCOME_BY_ROLE = {
 }
 
 
-def compute_metrics(
-    board: Board, count: int, intended_targets: list[str], guesses: list[str]
+def compute_round_metrics(
+    count: int,
+    intended_targets: list[str],
+    correct: list[str],
+    outcome: str,
+    assassin_hit: bool,
 ) -> dict:
-    max_guesses = None if count == 0 else count + 1
+    """Roll up a single round's already-resolved guessing into metrics.
 
-    correct: list[str] = []
-    outcome: str | None = None
-    for word in guesses:
-        if max_guesses is not None and len(correct) >= max_guesses:
-            break
-        role = board.role_of(word)
-        if role == "target":
-            correct.append(word)
-            continue
-        outcome = _OUTCOME_BY_ROLE[role]
-        break
-
-    assassin_hit = outcome == "hit_assassin"
-
-    if outcome is None:
-        full_budget_used = max_guesses is not None and len(correct) >= max_guesses
-        outcome = "all_correct" if full_budget_used else "stopped_early"
-
-    # Compute target_recovery_rate (game-outcome metric, counts all correct guesses)
+    `correct`, `outcome`, and `assassin_hit` are produced live by the
+    interactive guess-by-guess loop (see `experiment.run_game`) — this
+    function only derives the recovery/recall/precision numbers from them,
+    it does not re-walk or truncate a raw guess list.
+    """
     if count > 0:
         target_recovery_rate = len(correct) / count
     elif intended_targets:
@@ -38,7 +26,6 @@ def compute_metrics(
     else:
         target_recovery_rate = None
 
-    # Compute intended_recall and intended_precision
     if intended_targets:
         recovered_intended = [w for w in correct if w in intended_targets]
         intended_recall = len(recovered_intended) / len(intended_targets)

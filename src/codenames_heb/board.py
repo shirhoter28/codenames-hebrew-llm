@@ -9,6 +9,13 @@ ROLE_COUNTS: dict[str, int] = {
     "assassin": 1,
 }
 
+ROLE_TAGS: dict[str, str] = {
+    "target": "TARGET",
+    "opponent": "OPPONENT",
+    "civilian": "CIVILIAN",
+    "assassin": "ASSASSIN",
+}
+
 
 @dataclass(frozen=True)
 class Board:

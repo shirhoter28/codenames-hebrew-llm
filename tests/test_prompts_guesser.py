@@ -1,10 +1,12 @@
 import pytest
 
-from codenames_heb.prompts.guesser import build_guesser_prompt, parse_guesser_response
+from codenames_heb.prompts.guesser import build_single_guess_prompt, parse_single_guess_response
 
 
-def test_build_guesser_prompt_includes_board_clue_and_count():
-    system, user = build_guesser_prompt(["א", "ב", "ג"], clue="אור", count=2)
+def test_build_single_guess_prompt_includes_board_clue_and_count():
+    system, user = build_single_guess_prompt(
+        ["א", "ב", "ג"], clue="אור", count=2, correct_so_far=[], can_stop=False
+    )
 
     assert "א" in system
     assert "ב" in system
@@ -15,23 +17,56 @@ def test_build_guesser_prompt_includes_board_clue_and_count():
     assert user
 
 
-def test_build_guesser_prompt_describes_unlimited_guesses_when_count_is_zero():
-    system, _ = build_guesser_prompt(["א", "ב"], clue="אור", count=0)
+def test_build_single_guess_prompt_requires_guessing_when_cannot_stop():
+    system, _ = build_single_guess_prompt(
+        ["א"], clue="אור", count=1, correct_so_far=[], can_stop=False
+    )
 
-    assert "unlimited" in system.lower()
-
-
-def test_parse_guesser_response_valid():
-    result = parse_guesser_response({"guesses": [" ירח ", "שמש"]})
-
-    assert result == ["ירח", "שמש"]
+    assert '"action": "stop"' not in system
+    assert "must guess at least once" in system.lower()
 
 
-def test_parse_guesser_response_raises_when_guesses_missing():
+def test_build_single_guess_prompt_offers_stop_when_allowed():
+    system, _ = build_single_guess_prompt(
+        ["א"], clue="אור", count=2, correct_so_far=["ב"], can_stop=True
+    )
+
+    assert '"action": "stop"' in system
+    assert "ב" in system  # shown as already guessed correctly this round
+
+
+def test_build_single_guess_prompt_includes_revealed_context():
+    system, _ = build_single_guess_prompt(
+        ["א"], clue="אור", count=1, correct_so_far=[], can_stop=False,
+        revealed={"ג": "opponent"},
+    )
+
+    assert "REVEALED_SO_FAR" in system
+    assert "ג (OPPONENT)" in system
+
+
+def test_parse_single_guess_response_valid_guess():
+    result = parse_single_guess_response({"action": "guess", "word": " ירח "})
+
+    assert result == "ירח"
+
+
+def test_parse_single_guess_response_valid_stop():
+    result = parse_single_guess_response({"action": "stop"})
+
+    assert result is None
+
+
+def test_parse_single_guess_response_raises_when_action_missing():
     with pytest.raises(ValueError):
-        parse_guesser_response({})
+        parse_single_guess_response({})
 
 
-def test_parse_guesser_response_raises_when_guesses_not_a_list():
+def test_parse_single_guess_response_raises_on_unknown_action():
     with pytest.raises(ValueError):
-        parse_guesser_response({"guesses": "ירח"})
+        parse_single_guess_response({"action": "pass"})
+
+
+def test_parse_single_guess_response_raises_when_guess_missing_word():
+    with pytest.raises(ValueError):
+        parse_single_guess_response({"action": "guess"})

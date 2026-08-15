@@ -42,6 +42,39 @@ def test_strong_hebrew_prompt_omits_required_count_line_when_none():
     assert "chosen by you" not in system
 
 
+def test_strong_hebrew_prompt_hides_unrevealed_roles_of_revealed_words():
+    board = Board(
+        seed=1,
+        words=["ירח", "שמש", "ב", "ג", "ד"],
+        roles={
+            "ירח": "target",
+            "שמש": "target",
+            "ב": "opponent",
+            "ג": "civilian",
+            "ד": "assassin",
+        },
+    )
+
+    system, _ = build_strong_hebrew_prompt(board, revealed={"ירח": "target"})
+
+    # revealed target is no longer offered as a fresh YOUR_WORDS candidate...
+    assert "YOUR_WORDS: שמש" in system
+    # ...but is surfaced with its role in the REVEALED_SO_FAR context.
+    assert "REVEALED_SO_FAR: ירח (TARGET)" in system
+
+
+def test_strong_hebrew_prompt_omits_revealed_section_when_nothing_revealed():
+    system, _ = build_strong_hebrew_prompt(_board())
+
+    assert "REVEALED_SO_FAR" not in system
+
+
+def test_strong_hebrew_prompt_states_count_must_match_intended_targets():
+    system, _ = build_strong_hebrew_prompt(_board())
+
+    assert "count" in system and "intended_targets" in system
+
+
 def test_translate_pipeline_prompt_asks_for_english_intermediate_fields():
     system, _ = build_translate_pipeline_prompt(_board())
 
@@ -118,8 +151,9 @@ def test_validate_clue_legality_rejects_clue_already_on_board():
 
 
 def test_parse_codemaster_response_strips_whitespace_from_intended_targets():
-    # Guesses are stripped in parse_guesser_response; intended_targets must be
-    # stripped the same way or exact-string matching between them silently breaks.
+    # Guesses are stripped in parse_single_guess_response; intended_targets
+    # must be stripped the same way or exact-string matching between them
+    # silently breaks.
     response = parse_codemaster_response(
         {
             "clue": "אור",

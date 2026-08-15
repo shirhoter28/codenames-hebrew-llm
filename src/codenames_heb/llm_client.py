@@ -43,8 +43,8 @@ class OpenRouterClient:
     api_key: str | None = field(default=None)
     base_url: str = OPENROUTER_URL
     max_tokens: int = 1024
-    max_attempts: int = 4
-    retry_backoff: float = 0.5
+    max_attempts: int = 6
+    retry_backoff: float = 2.0
 
     def __post_init__(self) -> None:
         self.api_key = self.api_key or os.environ.get("OPENROUTER_API_KEY")
@@ -57,7 +57,7 @@ class OpenRouterClient:
         retryer = Retrying(
             retry=retry_if_exception(_is_retryable_transport_error),
             stop=stop_after_attempt(self.max_attempts),
-            wait=wait_exponential(multiplier=self.retry_backoff, max=30),
+            wait=wait_exponential(multiplier=self.retry_backoff, max=60),
             reraise=True,
         )
         return retryer(self._complete_once, model, system_prompt, user_prompt)

@@ -84,27 +84,53 @@ def test_llm_codemaster_retries_on_illegal_clue_then_gives_up():
     assert len(client.calls) == 3
 
 
-def test_llm_guesser_returns_parsed_guesses():
-    client = FakeClient([{"guesses": ["ירח", "ב"]}])
+def test_llm_guesser_returns_first_guess():
+    client = FakeClient([{"action": "guess", "word": "ירח"}])
     guesser = LLMGuesser(client=client, model="m")
 
-    result = guesser.guess(["ירח", "ב", "ג"], clue="אור", count=1)
+    result = guesser.guess_one(["ירח", "ב", "ג"], clue="אור", count=1, correct_so_far=[])
 
-    assert result == ["ירח", "ב"]
+    assert result == "ירח"
+
+
+def test_llm_guesser_returns_none_on_stop_when_allowed():
+    client = FakeClient([{"action": "stop"}])
+    guesser = LLMGuesser(client=client, model="m")
+
+    result = guesser.guess_one(
+        ["ב", "ג"], clue="אור", count=2, correct_so_far=["ירח"]
+    )
+
+    assert result is None
+
+
+def test_llm_guesser_retries_when_stopping_before_first_guess():
+    client = FakeClient(
+        [
+            {"action": "stop"},
+            {"action": "guess", "word": "ירח"},
+        ]
+    )
+    guesser = LLMGuesser(client=client, model="m")
+
+    result = guesser.guess_one(["ירח", "ב", "ג"], clue="אור", count=1, correct_so_far=[])
+
+    assert result == "ירח"
+    assert len(client.calls) == 2
 
 
 def test_llm_guesser_retries_when_guess_is_not_on_board_then_succeeds():
     client = FakeClient(
         [
-            {"guesses": ["not_on_board"]},
-            {"guesses": ["ירח"]},
+            {"action": "guess", "word": "not_on_board"},
+            {"action": "guess", "word": "ירח"},
         ]
     )
     guesser = LLMGuesser(client=client, model="m")
 
-    result = guesser.guess(["ירח", "ב", "ג"], clue="אור", count=1)
+    result = guesser.guess_one(["ירח", "ב", "ג"], clue="אור", count=1, correct_so_far=[])
 
-    assert result == ["ירח"]
+    assert result == "ירח"
     assert len(client.calls) == 2
 
 
@@ -113,7 +139,7 @@ def test_llm_guesser_raises_format_failure_after_retries():
     guesser = LLMGuesser(client=client, model="m", max_retries=3)
 
     with pytest.raises(FormatFailure):
-        guesser.guess(["ירח"], clue="אור", count=1)
+        guesser.guess_one(["ירח"], clue="אור", count=1, correct_so_far=[])
 
 
 # --- Fix 3: intended_targets must be words the codemaster was actually given ---
@@ -148,6 +174,23 @@ def test_llm_codemaster_retries_when_intended_target_is_off_board_entirely():
     assert len(client.calls) == 2
 
 
+def test_llm_codemaster_retries_when_intended_target_already_revealed():
+    # "ירח" is a real target word but it's already been found this game —
+    # it can't be re-targeted.
+    client = FakeClient(
+        [
+            {"clue": "אור", "count": 1, "intended_targets": ["ירח"], "reasoning": "r"},
+            {"clue": "אור", "count": 0, "intended_targets": [], "reasoning": "r"},
+        ]
+    )
+    codemaster = LLMCodemaster(client=client, model="m", method="strong_hebrew")
+
+    result = codemaster.give_clue(_board(), revealed={"ירח": "target"})
+
+    assert result["intended_targets"] == []
+    assert len(client.calls) == 2
+
+
 def test_llm_codemaster_gives_up_and_names_the_offending_targets():
     bad = {"clue": "אור", "count": 1, "intended_targets": ["שמש"], "reasoning": "r"}
     client = FakeClient([bad, bad, bad])
@@ -172,6 +215,38 @@ def test_llm_codemaster_accepts_empty_intended_targets():
     assert codemaster.give_clue(_board())["intended_targets"] == []
 
 
+# --- count must equal len(intended_targets) ---
+
+
+def test_llm_codemaster_retries_when_count_exceeds_intended_targets():
+    client = FakeClient(
+        [
+            {"clue": "אור", "count": 2, "intended_targets": ["ירח"], "reasoning": "r"},
+            {"clue": "אור", "count": 1, "intended_targets": ["ירח"], "reasoning": "r"},
+        ]
+    )
+    codemaster = LLMCodemaster(client=client, model="m", method="strong_hebrew")
+
+    result = codemaster.give_clue(_board())
+
+    assert result["count"] == 1
+    assert len(client.calls) == 2
+
+
+def test_llm_codemaster_gives_up_when_count_mismatches_intended_targets():
+    bad = {"clue": "אור", "count": 3, "intended_targets": ["ירח"], "reasoning": "r"}
+    client = FakeClient([bad, bad, bad])
+    codemaster = LLMCodemaster(
+        client=client, model="m", method="strong_hebrew", max_retries=3
+    )
+
+    with pytest.raises(FormatFailure) as excinfo:
+        codemaster.give_clue(_board())
+
+    assert "count 3 != len(intended_targets) 1" in str(excinfo.value)
+    assert len(client.calls) == 3
+
+
 # --- Fix 7: duplicate intended_targets are rejected (mirrors Fix 4 for guesses) ---
 
 
@@ -188,7 +263,7 @@ def test_llm_codemaster_retries_on_duplicate_intended_targets_then_succeeds():
         [
             {
                 "clue": "אור",
-                "count": 1,
+                "count": 2,
                 "intended_targets": ["ירח", "ירח"],
                 "reasoning": "r",
             },
@@ -211,7 +286,7 @@ def test_llm_codemaster_retries_on_duplicate_intended_targets_then_succeeds():
 def test_llm_codemaster_gives_up_on_duplicate_intended_targets_and_names_them():
     bad = {
         "clue": "אור",
-        "count": 1,
+        "count": 2,
         "intended_targets": ["ירח", "ירח"],
         "reasoning": "r",
     }
@@ -224,35 +299,6 @@ def test_llm_codemaster_gives_up_on_duplicate_intended_targets_and_names_them():
         codemaster.give_clue(_board_two_targets())
 
     assert "duplicate intended_targets" in str(excinfo.value)
-    assert len(client.calls) == 3
-
-
-# --- Fix 4: duplicate guesses are rejected ---
-
-
-def test_llm_guesser_retries_on_duplicate_guesses_then_succeeds():
-    client = FakeClient(
-        [
-            {"guesses": ["ירח", "ירח", "ירח"]},
-            {"guesses": ["ירח", "ב"]},
-        ]
-    )
-    guesser = LLMGuesser(client=client, model="m")
-
-    result = guesser.guess(["ירח", "ב", "ג"], clue="אור", count=1)
-
-    assert result == ["ירח", "ב"]
-    assert len(client.calls) == 2
-
-
-def test_llm_guesser_gives_up_on_duplicates_and_names_them():
-    client = FakeClient([{"guesses": ["ירח", "ירח"]}] * 3)
-    guesser = LLMGuesser(client=client, model="m", max_retries=3)
-
-    with pytest.raises(FormatFailure) as excinfo:
-        guesser.guess(["ירח", "ב", "ג"], clue="אור", count=1)
-
-    assert "duplicate guesses" in str(excinfo.value)
     assert len(client.calls) == 3
 
 
@@ -276,20 +322,20 @@ def test_llm_guesser_propagates_raw_response_from_underlying_failure():
     guesser = LLMGuesser(client=client, model="m", max_retries=3)
 
     with pytest.raises(FormatFailure) as excinfo:
-        guesser.guess(["ירח"], clue="אור", count=1)
+        guesser.guess_one(["ירח"], clue="אור", count=1, correct_so_far=[])
 
     assert excinfo.value.raw_response == "guesser said this"
 
 
 def test_llm_guesser_raw_response_is_none_for_local_validation_failure():
     # An off-board guess is a local ValueError; there is no separate raw text,
-    # but the message already names the offending values.
-    client = FakeClient([{"guesses": ["not_on_board"]}] * 3)
+    # but the message already names the offending value.
+    client = FakeClient([{"action": "guess", "word": "not_on_board"}] * 3)
     guesser = LLMGuesser(client=client, model="m", max_retries=3)
 
     with pytest.raises(FormatFailure) as excinfo:
-        guesser.guess(["ירח"], clue="אור", count=1)
+        guesser.guess_one(["ירח"], clue="אור", count=1, correct_so_far=[])
 
     assert excinfo.value.raw_response is None
-    assert "guesses not on board" in str(excinfo.value)
+    assert "not among currently guessable words" in str(excinfo.value)
     assert "not_on_board" in str(excinfo.value)

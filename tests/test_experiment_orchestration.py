@@ -6,11 +6,12 @@ import pytest
 import yaml
 
 from codenames_heb.board import Board, generate_board
-from codenames_heb.experiment import ExperimentConfig, load_config, run_experiment, run_trial
+from codenames_heb.experiment import ExperimentConfig, load_config, run_experiment, run_game
 from codenames_heb.llm_client import FormatFailure
 
 
 def _board() -> Board:
+    """3 targets, 1 opponent, 1 civilian, 1 assassin — small, fully controllable."""
     return Board(
         seed=1,
         words=["t1", "t2", "t3", "o1", "c1", "a1"],
@@ -25,79 +26,211 @@ def _board() -> Board:
     )
 
 
+def _two_target_board() -> Board:
+    return Board(
+        seed=2,
+        words=["t1", "t2", "o1", "c1", "a1"],
+        roles={"t1": "target", "t2": "target", "o1": "opponent", "c1": "civilian", "a1": "assassin"},
+    )
+
+
 class StubCodemaster:
-    def __init__(self, response=None, error=None):
-        self.response = response
+    """Scripted responses; raises AssertionError if called more than scripted
+    (a mismatch between the script and run_game's actual call count is a bug
+    in the test, not something to hide)."""
+
+    def __init__(self, responses=None, error=None):
+        self.responses = list(responses) if responses is not None else []
         self.error = error
 
-    def give_clue(self, board, required_count=None):
+    def give_clue(self, board, required_count=None, revealed=None):
+        if self.responses:
+            return self.responses.pop(0)
         if self.error:
             raise self.error
-        return self.response
+        raise AssertionError("StubCodemaster.give_clue called more times than scripted")
 
 
 class StubGuesser:
+    """Scripted per-call guesses; an entry of None means 'voluntarily stop'."""
+
     def __init__(self, guesses=None, error=None):
-        self.guesses = guesses if guesses is not None else []
+        self.guesses = list(guesses) if guesses is not None else []
         self.error = error
 
-    def guess(self, words, clue, count):
+    def guess_one(self, words, clue, count, correct_so_far, revealed=None):
+        if self.guesses:
+            return self.guesses.pop(0)
         if self.error:
             raise self.error
-        return self.guesses
+        raise AssertionError("StubGuesser.guess_one called more times than scripted")
 
 
-def test_run_trial_returns_ok_status_with_metrics():
+class AutoCodemaster:
+    """Always gives the same trivial clue. run_game never validates a
+    codemaster's response against the real board (only the real
+    LLMCodemaster does), so this is enough to drive an arbitrary real
+    (generate_board-produced) board to completion without scripting exact
+    per-game sequences."""
+
+    def give_clue(self, board, required_count=None, revealed=None):
+        return {"clue": "x", "count": 0, "intended_targets": [], "reasoning": "r"}
+
+
+class AutoGuesser:
+    """Guesses the first still-unrevealed word each round, and stops
+    voluntarily the moment it's allowed to (after one correct guess).
+    Reveals exactly one new word per round, so any real board is guaranteed
+    to terminate (win/loss/max_rounds) within `len(board.words)` rounds."""
+
+    def guess_one(self, words, clue, count, correct_so_far, revealed=None):
+        if correct_so_far:
+            return None
+        return words[0]
+
+
+# --- run_game: single game, full control over board + scripted responses ---
+
+
+def test_run_game_wins_when_all_targets_found_in_one_round():
     codemaster = StubCodemaster(
-        response={"clue": "x", "count": 2, "intended_targets": ["t1", "t2"], "reasoning": "r"}
+        responses=[{"clue": "x", "count": 3, "intended_targets": ["t1", "t2", "t3"], "reasoning": "r"}]
     )
-    guesser = StubGuesser(guesses=["t1", "t2"])
+    guesser = StubGuesser(guesses=["t1", "t2", "t3", None])
 
-    row = run_trial(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
+    row = run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
 
     assert row["status"] == "ok"
     assert row["model"] == "m"
     assert row["method"] == "strong_hebrew"
     assert row["board_seed"] == 1
     assert row["trial"] == 0
-    assert row["guesses_before_miss"] == 2
-    # Budget is count + 1 = 3; only 2 of 3 guesses were used (no wrong guess,
-    # guesser just stopped), so per compute_metrics' established semantics
-    # (see test_stopped_early_when_fewer_guesses_than_budget_all_correct in
-    # test_metrics.py) this is "stopped_early", not "all_correct".
-    assert row["turn_outcome"] == "stopped_early"
+    assert row["outcome"] == "win"
+    assert row["game_length"] == 1
+    assert row["targets_found"] == 3
+    assert row["assassin_hit"] is False
+    assert row["rounds"][0]["guess_sequence"] == [
+        {"word": "t1", "role": "target"},
+        {"word": "t2", "role": "target"},
+        {"word": "t3", "role": "target"},
+    ]
+    assert row["rounds"][0]["turn_outcome"] == "stopped_early"
 
 
-def test_run_trial_returns_format_failure_when_codemaster_fails():
+def test_run_game_loses_on_assassin_guess():
+    codemaster = StubCodemaster(
+        responses=[{"clue": "x", "count": 1, "intended_targets": ["t1"], "reasoning": "r"}]
+    )
+    guesser = StubGuesser(guesses=["a1"])
+
+    row = run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
+
+    assert row["status"] == "ok"
+    assert row["outcome"] == "loss"
+    assert row["assassin_hit"] is True
+    assert row["game_length"] == 1
+    assert row["rounds"][0]["turn_outcome"] == "hit_assassin"
+
+
+def test_run_game_wins_across_multiple_rounds():
+    codemaster = StubCodemaster(
+        responses=[
+            {"clue": "x", "count": 2, "intended_targets": ["t1", "t2"], "reasoning": "r"},
+            {"clue": "y", "count": 1, "intended_targets": ["t3"], "reasoning": "r"},
+        ]
+    )
+    guesser = StubGuesser(guesses=["t1", "t2", None, "t3", None])
+
+    row = run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
+
+    assert row["outcome"] == "win"
+    assert row["game_length"] == 2
+    assert [r["clue"] for r in row["rounds"]] == ["x", "y"]
+
+
+def test_run_game_round_stops_at_budget_cap_without_voluntary_stop():
+    # count=1 -> budget is 2 guesses; both happen to be correct, so the round
+    # ends because the budget ran out, not because the guesser chose to stop.
+    codemaster = StubCodemaster(
+        responses=[{"clue": "x", "count": 1, "intended_targets": ["t1"], "reasoning": "r"}]
+    )
+    guesser = StubGuesser(guesses=["t1", "t2"])
+
+    row = run_game(
+        codemaster, guesser, _two_target_board(), model="m", method="strong_hebrew", trial=0
+    )
+
+    assert row["rounds"][0]["turn_outcome"] == "all_correct"
+    assert row["outcome"] == "win"
+    assert row["game_length"] == 1
+
+
+def test_run_game_reports_max_rounds_reached_when_capped():
+    codemaster = StubCodemaster(
+        responses=[
+            {"clue": "x", "count": 0, "intended_targets": [], "reasoning": "r"},
+            {"clue": "y", "count": 0, "intended_targets": [], "reasoning": "r"},
+        ]
+    )
+    guesser = StubGuesser(guesses=["c1", "o1"])
+
+    row = run_game(
+        codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0, max_rounds=2
+    )
+
+    assert row["status"] == "ok"
+    assert row["outcome"] == "max_rounds_reached"
+    assert row["game_length"] == 2
+
+
+def test_run_game_returns_format_failure_when_codemaster_fails_on_first_round():
     codemaster = StubCodemaster(error=FormatFailure("bad codemaster output"))
     guesser = StubGuesser()
 
-    row = run_trial(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
+    row = run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
 
     assert row["status"] == "format_failure"
     assert row["stage"] == "codemaster"
+    assert row["round"] == 1
+    assert row["rounds"] == []
 
 
-def test_run_trial_returns_format_failure_when_guesser_fails():
+def test_run_game_format_failure_mid_game_preserves_completed_rounds():
     codemaster = StubCodemaster(
-        response={"clue": "x", "count": 1, "intended_targets": ["t1"], "reasoning": "r"}
+        responses=[{"clue": "x", "count": 0, "intended_targets": [], "reasoning": "r"}],
+        error=FormatFailure("bad codemaster output"),
+    )
+    guesser = StubGuesser(guesses=["c1"])
+
+    row = run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
+
+    assert row["status"] == "format_failure"
+    assert row["stage"] == "codemaster"
+    assert row["round"] == 2
+    assert len(row["rounds"]) == 1
+    assert row["rounds"][0]["turn_outcome"] == "hit_civilian"
+
+
+def test_run_game_returns_format_failure_when_guesser_fails():
+    codemaster = StubCodemaster(
+        responses=[{"clue": "x", "count": 1, "intended_targets": ["t1"], "reasoning": "r"}]
     )
     guesser = StubGuesser(error=FormatFailure("bad guesser output"))
 
-    row = run_trial(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
+    row = run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
 
     assert row["status"] == "format_failure"
     assert row["stage"] == "guesser"
+    assert row["round"] == 1
+    assert row["rounds"] == []
+    assert row["clue"] == "x"
 
 
-# --- Fix 1.3: any unexpected exception is a harness "error", not a format_failure ---
-
-
-def test_run_trial_returns_error_status_when_codemaster_raises_unexpected_exception():
+def test_run_game_error_status_when_codemaster_raises_unexpected_exception():
     codemaster = StubCodemaster(error=RuntimeError("connection reset"))
     guesser = StubGuesser()
 
-    row = run_trial(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
+    row = run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
 
     assert row["status"] == "error"
     assert row["stage"] == "codemaster"
@@ -105,13 +238,13 @@ def test_run_trial_returns_error_status_when_codemaster_raises_unexpected_except
     assert row["board_seed"] == 1
 
 
-def test_run_trial_returns_error_status_when_guesser_raises_unexpected_exception():
+def test_run_game_error_status_when_guesser_raises_unexpected_exception():
     codemaster = StubCodemaster(
-        response={"clue": "x", "count": 1, "intended_targets": ["t1"], "reasoning": "r"}
+        responses=[{"clue": "x", "count": 1, "intended_targets": ["t1"], "reasoning": "r"}]
     )
     guesser = StubGuesser(error=KeyError("choices"))
 
-    row = run_trial(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
+    row = run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
 
     assert row["status"] == "error"
     assert row["stage"] == "guesser"
@@ -119,12 +252,16 @@ def test_run_trial_returns_error_status_when_guesser_raises_unexpected_exception
     assert row["clue"] == "x"
 
 
-def test_run_trial_error_status_is_distinct_from_format_failure():
-    codemaster = StubCodemaster(error=RuntimeError("infra"))
-    row_error = run_trial(
-        codemaster, StubGuesser(), _board(), model="m", method="strong_hebrew", trial=0
+def test_run_game_error_status_is_distinct_from_format_failure():
+    row_error = run_game(
+        StubCodemaster(error=RuntimeError("infra")),
+        StubGuesser(),
+        _board(),
+        model="m",
+        method="strong_hebrew",
+        trial=0,
     )
-    row_format = run_trial(
+    row_format = run_game(
         StubCodemaster(error=FormatFailure("bad")),
         StubGuesser(),
         _board(),
@@ -136,13 +273,10 @@ def test_run_trial_error_status_is_distinct_from_format_failure():
     assert row_error["status"] != row_format["status"]
 
 
-# --- Fix 6.4: format_failure rows log the raw model response ---
-
-
-def test_run_trial_logs_raw_response_on_codemaster_format_failure():
+def test_run_game_logs_raw_response_on_codemaster_format_failure():
     codemaster = StubCodemaster(error=FormatFailure("bad", raw_response="I refuse."))
 
-    row = run_trial(
+    row = run_game(
         codemaster, StubGuesser(), _board(), model="m", method="strong_hebrew", trial=0
     )
 
@@ -150,26 +284,43 @@ def test_run_trial_logs_raw_response_on_codemaster_format_failure():
     assert row["raw_response"] == "I refuse."
 
 
-def test_run_trial_logs_raw_response_on_guesser_format_failure():
+def test_run_game_logs_raw_response_on_guesser_format_failure():
     codemaster = StubCodemaster(
-        response={"clue": "x", "count": 1, "intended_targets": ["t1"], "reasoning": "r"}
+        responses=[{"clue": "x", "count": 1, "intended_targets": ["t1"], "reasoning": "r"}]
     )
     guesser = StubGuesser(error=FormatFailure("bad", raw_response="hmm..."))
 
-    row = run_trial(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
+    row = run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
 
     assert row["raw_response"] == "hmm..."
 
 
-def test_run_trial_raw_response_key_present_even_when_absent_on_exception():
-    codemaster = StubCodemaster(error=FormatFailure("bad"))
+def test_run_game_sleeps_after_every_llm_call(mocker):
+    sleep = mocker.patch("codenames_heb.experiment.time.sleep")
+    codemaster = StubCodemaster(
+        responses=[{"clue": "x", "count": 3, "intended_targets": ["t1", "t2", "t3"], "reasoning": "r"}]
+    )
+    guesser = StubGuesser(guesses=["t1", "t2", "t3", None])
 
-    row = run_trial(
-        codemaster, StubGuesser(), _board(), model="m", method="strong_hebrew", trial=0
+    run_game(
+        codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0, call_delay=2.5
     )
 
-    assert "raw_response" in row
-    assert row["raw_response"] is None
+    # 1 codemaster call + 4 guesser calls (3 guesses + 1 voluntary stop) = 5 LLM calls.
+    assert sleep.call_count == 5
+    assert all(c.args[0] == 2.5 for c in sleep.call_args_list)
+
+
+def test_run_game_does_not_sleep_when_call_delay_is_zero(mocker):
+    sleep = mocker.patch("codenames_heb.experiment.time.sleep")
+    codemaster = StubCodemaster(
+        responses=[{"clue": "x", "count": 0, "intended_targets": [], "reasoning": "r"}]
+    )
+    guesser = StubGuesser(guesses=["c1"])
+
+    run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
+
+    assert sleep.call_count == 0
 
 
 def test_load_config_reads_yaml(tmp_path):
@@ -196,6 +347,16 @@ def test_load_config_reads_yaml(tmp_path):
     )
 
 
+def _stub_factories():
+    def make_codemaster(model, method):
+        return AutoCodemaster()
+
+    def make_guesser(model):
+        return AutoGuesser()
+
+    return make_codemaster, make_guesser
+
+
 def test_run_experiment_writes_expected_number_of_rows(tmp_path):
     config = ExperimentConfig(
         models=["model-a", "model-b"],
@@ -206,14 +367,7 @@ def test_run_experiment_writes_expected_number_of_rows(tmp_path):
         n_trials=2,
     )
     word_pool = [f"word{i}" for i in range(40)]
-
-    def make_codemaster(model, method):
-        return StubCodemaster(
-            response={"clue": "x", "count": 1, "intended_targets": [], "reasoning": "r"}
-        )
-
-    def make_guesser(model):
-        return StubGuesser(guesses=[])
+    make_codemaster, make_guesser = _stub_factories()
 
     run_dir = run_experiment(
         config=config,
@@ -231,8 +385,24 @@ def test_run_experiment_writes_expected_number_of_rows(tmp_path):
         json.loads(line)  # each line is valid JSON
 
     with (run_dir / "metrics.csv").open(encoding="utf-8") as f:
-        csv_rows = list(csv.DictReader(f))
+        reader = csv.DictReader(f)
+        assert reader.fieldnames == [
+            "model",
+            "method",
+            "board_seed",
+            "trial",
+            "status",
+            "stage",
+            "outcome",
+            "game_length",
+            "targets_found",
+            "target_recovery_rate",
+            "assassin_hit",
+            "error",
+        ]
+        csv_rows = list(reader)
     assert len(csv_rows) == 8
+    assert all(row["status"] == "ok" for row in csv_rows)
 
 
 def test_run_experiment_reuses_same_boards_across_models(tmp_path):
@@ -245,14 +415,7 @@ def test_run_experiment_reuses_same_boards_across_models(tmp_path):
         n_trials=1,
     )
     word_pool = [f"word{i}" for i in range(40)]
-
-    def make_codemaster(model, method):
-        return StubCodemaster(
-            response={"clue": "x", "count": 1, "intended_targets": [], "reasoning": "r"}
-        )
-
-    def make_guesser(model):
-        return StubGuesser(guesses=[])
+    make_codemaster, make_guesser = _stub_factories()
 
     run_dir = run_experiment(
         config=config,
@@ -376,7 +539,7 @@ def test_load_config_accepts_the_real_pilot_config():
     assert config.codemaster_prompt_methods
 
 
-# --- Fix 2: a small delay between trials, gentle on free-tier rate limits ---
+# --- Fix 2: a small delay between LLM calls, gentle on free-tier rate limits ---
 
 
 def _tiny_config(**overrides) -> ExperimentConfig:
@@ -392,19 +555,7 @@ def _tiny_config(**overrides) -> ExperimentConfig:
     return ExperimentConfig(**defaults)
 
 
-def _stub_factories():
-    def make_codemaster(model, method):
-        return StubCodemaster(
-            response={"clue": "x", "count": 1, "intended_targets": [], "reasoning": "r"}
-        )
-
-    def make_guesser(model):
-        return StubGuesser(guesses=[])
-
-    return make_codemaster, make_guesser
-
-
-def test_run_experiment_sleeps_between_trials_by_default(tmp_path, mocker):
+def test_run_experiment_sleeps_between_llm_calls_by_default(tmp_path, mocker):
     sleep = mocker.patch("codenames_heb.experiment.time.sleep")
     make_codemaster, make_guesser = _stub_factories()
 
@@ -416,8 +567,10 @@ def test_run_experiment_sleeps_between_trials_by_default(tmp_path, mocker):
         results_dir=tmp_path,
     )
 
-    assert sleep.call_count == 4  # 1 model x 1 method x 2 boards x 2 trials
-    assert sleep.call_args_list[0].args[0] == 0.5
+    # Exact count depends on how many rounds each game takes (not scripted
+    # here); what matters is pacing is wired through at all, at the right value.
+    assert sleep.call_count > 0
+    assert all(c.args[0] == 3.0 for c in sleep.call_args_list)
 
 
 def test_run_experiment_trial_delay_is_overridable(tmp_path, mocker):

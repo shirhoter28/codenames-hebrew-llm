@@ -10,14 +10,20 @@ import yaml
 
 from codenames_heb.board import Board, generate_board
 from codenames_heb.llm_client import FormatFailure
-from codenames_heb.metrics import compute_metrics
+from codenames_heb.metrics import compute_round_metrics
 from codenames_heb.prompts.codemaster import (
     PROMPT_METHODS,
     parse_codemaster_response,
     validate_clue_legality,
 )
-from codenames_heb.prompts.guesser import build_guesser_prompt, parse_guesser_response
+from codenames_heb.prompts.guesser import build_single_guess_prompt, parse_single_guess_response
 from codenames_heb.roles import Codemaster, Guesser
+
+_OUTCOME_BY_ROLE = {
+    "opponent": "hit_opponent",
+    "civilian": "hit_civilian",
+    "assassin": "hit_assassin",
+}
 
 
 @dataclass
@@ -27,9 +33,15 @@ class LLMCodemaster:
     method: str
     max_retries: int = 3
 
-    def give_clue(self, board: Board, required_count: int | None = None) -> dict:
+    def give_clue(
+        self,
+        board: Board,
+        required_count: int | None = None,
+        revealed: dict[str, str] | None = None,
+    ) -> dict:
+        revealed = revealed or {}
         build_prompt = PROMPT_METHODS[self.method]
-        system, user = build_prompt(board, required_count)
+        system, user = build_prompt(board, required_count, revealed)
         last_error: Exception | None = None
         for _ in range(self.max_retries):
             try:
@@ -38,7 +50,11 @@ class LLMCodemaster:
                 validate_clue_legality(response.clue, board)
                 # intended_targets must be words the model was actually shown as
                 # YOUR_WORDS — otherwise intended_recall/precision are corrupted.
-                target_words = board.words_with_role("target")
+                # Already-revealed targets are excluded: they've been found and
+                # can't be re-targeted.
+                target_words = [
+                    w for w in board.words_with_role("target") if w not in revealed
+                ]
                 invalid = [w for w in response.intended_targets if w not in target_words]
                 if invalid:
                     raise ValueError(f"intended_targets not on board: {invalid}")
@@ -46,6 +62,15 @@ class LLMCodemaster:
                 # trial even though the model only meant to name one word.
                 if len(set(response.intended_targets)) != len(response.intended_targets):
                     raise ValueError(f"duplicate intended_targets: {response.intended_targets}")
+                # count must describe exactly the words intended_targets names —
+                # otherwise the guesser's budget (count + 1) doesn't match what
+                # the codemaster actually meant, and metrics using `count` (e.g.
+                # target_recovery_rate) are computed against the wrong number.
+                if response.count != len(response.intended_targets):
+                    raise ValueError(
+                        f"count {response.count} != len(intended_targets) "
+                        f"{len(response.intended_targets)}"
+                    )
                 return asdict(response)
             except (FormatFailure, ValueError) as exc:
                 last_error = exc
@@ -63,21 +88,30 @@ class LLMGuesser:
     model: str
     max_retries: int = 3
 
-    def guess(self, words: list[str], clue: str, count: int) -> list[str]:
-        system, user = build_guesser_prompt(words, clue, count)
+    def guess_one(
+        self,
+        words: list[str],
+        clue: str,
+        count: int,
+        correct_so_far: list[str],
+        revealed: dict[str, str] | None = None,
+    ) -> str | None:
+        can_stop = len(correct_so_far) >= 1
+        system, user = build_single_guess_prompt(
+            words, clue, count, correct_so_far, can_stop, revealed
+        )
         last_error: Exception | None = None
         for _ in range(self.max_retries):
             try:
                 data = self.client.complete_json(self.model, system, user, max_retries=1)
-                guesses = parse_guesser_response(data)
-                invalid = [g for g in guesses if g not in words]
-                if invalid:
-                    raise ValueError(f"guesses not on board: {invalid}")
-                # A revealed word can't be re-guessed in real Codenames; repeats
-                # would inflate guesses_before_miss / recovery / recall.
-                if len(set(guesses)) != len(guesses):
-                    raise ValueError(f"duplicate guesses: {guesses}")
-                return guesses
+                guess = parse_single_guess_response(data)
+                if guess is None:
+                    if not can_stop:
+                        raise ValueError("cannot stop before guessing at least once")
+                    return None
+                if guess not in words:
+                    raise ValueError(f"guess '{guess}' not among currently guessable words")
+                return guess
             except (FormatFailure, ValueError) as exc:
                 last_error = exc
                 continue
@@ -144,56 +178,152 @@ def load_config(path) -> ExperimentConfig:
     )
 
 
-def run_trial(
+def _play_round(
+    guesser: Guesser,
+    board: Board,
+    clue: str,
+    count: int,
+    revealed: dict[str, str],
+    call_delay: float,
+) -> tuple[list[str], list[dict], str]:
+    """Run the interactive guess-by-guess loop for one clue.
+
+    Mutates `revealed` in place as words are guessed. Returns
+    (correct, guess_sequence, outcome).
+    """
+    max_guesses = None if count == 0 else count + 1
+    correct: list[str] = []
+    guess_sequence: list[dict] = []
+
+    while True:
+        if max_guesses is not None and len(correct) >= max_guesses:
+            return correct, guess_sequence, "all_correct"
+
+        remaining = [w for w in board.words if w not in revealed]
+        if not remaining:
+            outcome = "all_correct" if correct else "stopped_early"
+            return correct, guess_sequence, outcome
+
+        guess = guesser.guess_one(remaining, clue, count, correct, revealed=dict(revealed))
+        if call_delay:
+            time.sleep(call_delay)
+
+        if guess is None:
+            return correct, guess_sequence, "stopped_early"
+
+        role = board.role_of(guess)
+        revealed[guess] = role
+        guess_sequence.append({"word": guess, "role": role})
+        if role == "target":
+            correct.append(guess)
+            continue
+        return correct, guess_sequence, _OUTCOME_BY_ROLE[role]
+
+
+def run_game(
     codemaster: Codemaster,
     guesser: Guesser,
     board: Board,
     model: str,
     method: str,
     trial: int,
+    call_delay: float = 0.0,
+    max_rounds: int | None = None,
 ) -> dict:
     base = {"model": model, "method": method, "board_seed": board.seed, "trial": trial}
+    if max_rounds is None:
+        # Safety backstop, not the expected path: every round reveals at
+        # least one word (a guess can't repeat an already-revealed word), so
+        # the game is structurally bounded by the board size regardless.
+        max_rounds = len(board.words)
 
-    try:
-        cm = codemaster.give_clue(board)
-    except FormatFailure as exc:
-        return {
-            **base,
-            "status": "format_failure",
-            "stage": "codemaster",
-            "error": str(exc),
-            "raw_response": getattr(exc, "raw_response", None),
-        }
-    except Exception as exc:  # backstop: a harness/infra failure must not abort the run
-        return {
-            **base,
-            "status": "error",
-            "stage": "codemaster",
-            "error": f"{type(exc).__name__}: {exc}",
-        }
+    revealed: dict[str, str] = {}
+    target_words = set(board.words_with_role("target"))
+    rounds: list[dict] = []
+    outcome = "max_rounds_reached"
 
-    try:
-        guesses = guesser.guess(board.words, cm["clue"], cm["count"])
-    except FormatFailure as exc:
-        return {
-            **base,
-            "status": "format_failure",
-            "stage": "guesser",
-            "error": str(exc),
-            "raw_response": getattr(exc, "raw_response", None),
-            **cm,
-        }
-    except Exception as exc:  # backstop: a harness/infra failure must not abort the run
-        return {
-            **base,
-            "status": "error",
-            "stage": "guesser",
-            "error": f"{type(exc).__name__}: {exc}",
-            **cm,
-        }
+    for round_num in range(1, max_rounds + 1):
+        try:
+            cm = codemaster.give_clue(board, revealed=dict(revealed))
+        except FormatFailure as exc:
+            return {
+                **base,
+                "status": "format_failure",
+                "stage": "codemaster",
+                "round": round_num,
+                "rounds": rounds,
+                "error": str(exc),
+                "raw_response": getattr(exc, "raw_response", None),
+            }
+        except Exception as exc:  # backstop: a harness/infra failure must not abort the run
+            return {
+                **base,
+                "status": "error",
+                "stage": "codemaster",
+                "round": round_num,
+                "rounds": rounds,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        if call_delay:
+            time.sleep(call_delay)
 
-    metrics = compute_metrics(board, cm["count"], cm["intended_targets"], guesses)
-    return {**base, "status": "ok", **cm, "guesses": guesses, **metrics}
+        try:
+            correct, guess_sequence, round_outcome = _play_round(
+                guesser, board, cm["clue"], cm["count"], revealed, call_delay
+            )
+        except FormatFailure as exc:
+            return {
+                **base,
+                "status": "format_failure",
+                "stage": "guesser",
+                "round": round_num,
+                "rounds": rounds,
+                "error": str(exc),
+                "raw_response": getattr(exc, "raw_response", None),
+                **cm,
+            }
+        except Exception as exc:  # backstop: a harness/infra failure must not abort the run
+            return {
+                **base,
+                "status": "error",
+                "stage": "guesser",
+                "round": round_num,
+                "rounds": rounds,
+                "error": f"{type(exc).__name__}: {exc}",
+                **cm,
+            }
+
+        assassin_hit = round_outcome == "hit_assassin"
+        round_metrics = compute_round_metrics(
+            cm["count"], cm["intended_targets"], correct, round_outcome, assassin_hit
+        )
+        rounds.append(
+            {
+                "round": round_num,
+                **cm,
+                "guess_sequence": guess_sequence,
+                **round_metrics,
+            }
+        )
+
+        if assassin_hit:
+            outcome = "loss"
+            break
+        if target_words <= revealed.keys():
+            outcome = "win"
+            break
+
+    targets_found = len(target_words & revealed.keys())
+    return {
+        **base,
+        "status": "ok",
+        "outcome": outcome,
+        "game_length": len(rounds),
+        "targets_found": targets_found,
+        "target_recovery_rate": targets_found / len(target_words) if target_words else None,
+        "assassin_hit": outcome == "loss",
+        "rounds": rounds,
+    }
 
 
 _CSV_FIELDNAMES = [
@@ -203,14 +333,12 @@ _CSV_FIELDNAMES = [
     "trial",
     "status",
     "stage",
-    "clue",
-    "count",
-    "guesses_before_miss",
-    "turn_outcome",
-    "assassin_hit",
+    "outcome",
+    "game_length",
+    "targets_found",
     "target_recovery_rate",
-    "intended_recall",
-    "intended_precision",
+    "assassin_hit",
+    "error",
 ]
 
 
@@ -248,7 +376,7 @@ def run_experiment(
     make_guesser: Callable[[str], Guesser],
     results_dir,
     config_path=None,
-    trial_delay: float = 0.5,
+    trial_delay: float = 3.0,
 ) -> Path:
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     run_dir = Path(results_dir) / run_id
@@ -266,11 +394,17 @@ def run_experiment(
                 codemaster = make_codemaster(model, method)
                 for board in boards:
                     for trial in range(config.n_trials):
-                        row = run_trial(codemaster, guesser, board, model, method, trial)
+                        row = run_game(
+                            codemaster,
+                            guesser,
+                            board,
+                            model,
+                            method,
+                            trial,
+                            call_delay=trial_delay,
+                        )
                         raw_file.write(json.dumps(row, ensure_ascii=False) + "\n")
                         rows.append(row)
-                        if trial_delay:
-                            time.sleep(trial_delay)
 
     _write_metrics_csv(rows, run_dir / "metrics.csv")
     return run_dir

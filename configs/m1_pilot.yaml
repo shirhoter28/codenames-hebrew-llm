@@ -1,11 +1,10 @@
 models:
-  - google/gemma-4-31b-it:free
   - meta-llama/llama-3.3-70b-instruct
   - qwen/qwen3.5-9b
 codemaster_prompt_methods:
   - strong_hebrew
   - translate_pipeline
-guesser_model: google/gemma-4-31b-it:free
+guesser_model: meta-llama/llama-3.3-70b-instruct
 board_style: standard
 n_boards: 10
 n_trials: 3

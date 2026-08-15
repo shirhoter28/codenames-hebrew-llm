@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -20,7 +21,8 @@ class FakeClient:
         return response
 
 
-def test_main_wires_config_and_client_into_a_single_run(tmp_path):
+def test_main_wires_config_and_client_into_a_single_run(tmp_path, mocker):
+    mocker.patch("codenames_heb.experiment.time.sleep")  # games make several LLM calls
     config_path = tmp_path / "tiny.yaml"
     config_path.write_text(
         "models: [dummy/model]\n"
@@ -31,18 +33,19 @@ def test_main_wires_config_and_client_into_a_single_run(tmp_path):
         "n_trials: 1\n",
         encoding="utf-8",
     )
-    # "קשת" is a word actually placed on the board generated for this config
-    # (word_pool from the real data + seed=0, deterministic); the brief's
-    # original placeholder "ירח" is a valid dual word but isn't selected onto
-    # this particular board, which raises a KeyError in Board.role_of.
+    # "קשת" (target) and "מזלג" (assassin) are words actually placed on the
+    # board generated for this config (word_pool from the real data + seed=0,
+    # deterministic). Guessing the assassin immediately ends the game in one
+    # round, keeping this a simple smoke test of main()'s wiring rather than
+    # a full game simulation.
     codemaster_json = {
         "clue": "בדיקה_קליט_ייחודי",
         "count": 1,
         "intended_targets": ["קשת"],
         "reasoning": "r",
     }
-    guesser_json = {"guesses": ["קשת"]}
-    fake_client = FakeClient([codemaster_json, guesser_json])
+    guess_json = {"action": "guess", "word": "מזלג"}
+    fake_client = FakeClient([codemaster_json, guess_json])
     results_dir = tmp_path / "results"
 
     run_dir = main(config_path=config_path, results_dir=results_dir, client=fake_client)
@@ -51,5 +54,7 @@ def test_main_wires_config_and_client_into_a_single_run(tmp_path):
     assert (run_dir / "metrics.csv").exists()
     lines = (run_dir / "raw.jsonl").read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 1
-    # 1 codemaster call + 1 guesser call
+    row = json.loads(lines[0])
+    assert row["outcome"] == "loss"
+    # 1 codemaster call + 1 guess (the assassin, ending the game immediately)
     assert len(fake_client.calls) == 2

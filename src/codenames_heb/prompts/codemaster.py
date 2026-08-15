@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from codenames_heb.board import Board
+from codenames_heb.board import ROLE_TAGS, Board
 from codenames_heb.prompts.rules import GAME_RULES
 
 
@@ -15,13 +15,24 @@ class CodemasterResponse:
     en_targets: list[str] | None = None
 
 
-def _format_board_section(board: Board) -> str:
-    return (
-        f"YOUR_WORDS: {', '.join(board.words_with_role('target'))}\n"
-        f"OPPONENT_WORDS: {', '.join(board.words_with_role('opponent'))}\n"
-        f"CIVILIAN_WORDS: {', '.join(board.words_with_role('civilian'))}\n"
-        f"ASSASSIN_WORD: {', '.join(board.words_with_role('assassin'))}"
+def _format_board_section(board: Board, revealed: dict[str, str] | None = None) -> str:
+    revealed = revealed or {}
+
+    def unrevealed(role: str) -> list[str]:
+        return [w for w in board.words_with_role(role) if w not in revealed]
+
+    section = (
+        f"YOUR_WORDS: {', '.join(unrevealed('target'))}\n"
+        f"OPPONENT_WORDS: {', '.join(unrevealed('opponent'))}\n"
+        f"CIVILIAN_WORDS: {', '.join(unrevealed('civilian'))}\n"
+        f"ASSASSIN_WORD: {', '.join(unrevealed('assassin'))}"
     )
+    if revealed:
+        revealed_line = ", ".join(
+            f"{word} ({ROLE_TAGS[role]})" for word, role in revealed.items()
+        )
+        section += f"\nREVEALED_SO_FAR: {revealed_line}"
+    return section
 
 
 def _required_count_line(required_count: int | None) -> str:
@@ -46,17 +57,19 @@ Strict rules:
    clue or drop that target.
 4. Only include a word in intended_targets if you're confident a guesser
    could find it from the clue alone with no other help.
+5. `count` must equal exactly the number of words in `intended_targets` —
+   no more, no fewer.
 {required_count_line}
 Respond with JSON only: {{"clue": "...", "count": <int>,
 "intended_targets": ["..."], "reasoning": "one sentence"}}"""
 
 
 def build_strong_hebrew_prompt(
-    board: Board, required_count: int | None = None
+    board: Board, required_count: int | None = None, revealed: dict[str, str] | None = None
 ) -> tuple[str, str]:
     system = _STRONG_HEBREW_TEMPLATE.format(
         game_rules=GAME_RULES,
-        board_section=_format_board_section(board),
+        board_section=_format_board_section(board, revealed),
         required_count_line=_required_count_line(required_count),
     )
     return system, "Provide your clue now."
@@ -70,7 +83,8 @@ You are an expert Codemaster in Codenames, playing in Hebrew.
 First translate all board words to English internally. Think as a
 Codemaster playing in English and choose your target words and English
 clue. Then translate that English clue into one Hebrew word for your
-final answer.
+final answer. `count` must equal exactly the number of words in
+`intended_targets` — no more, no fewer.
 {required_count_line}
 Respond with JSON only: {{"clue": "...", "count": <int>,
 "intended_targets": ["..."], "reasoning": "one sentence",
@@ -79,11 +93,11 @@ Respond with JSON only: {{"clue": "...", "count": <int>,
 
 
 def build_translate_pipeline_prompt(
-    board: Board, required_count: int | None = None
+    board: Board, required_count: int | None = None, revealed: dict[str, str] | None = None
 ) -> tuple[str, str]:
     system = _TRANSLATE_PIPELINE_TEMPLATE.format(
         game_rules=GAME_RULES,
-        board_section=_format_board_section(board),
+        board_section=_format_board_section(board, revealed),
         required_count_line=_required_count_line(required_count),
     )
     return system, "Provide your clue now."
