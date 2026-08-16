@@ -18,12 +18,12 @@ def main(
     client: OpenRouterClient | None = None,
 ) -> Path:
     config = load_config(config_path)
-    word_pool = load_word_lists().all
+    word_lists = load_word_lists()
     client = client or OpenRouterClient()
 
     run_dir = run_experiment(
         config=config,
-        word_pool=word_pool,
+        word_lists=word_lists,
         make_codemaster=lambda model, method: LLMCodemaster(
             client=client, model=model, method=method
         ),

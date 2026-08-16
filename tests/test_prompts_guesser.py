@@ -35,6 +35,31 @@ def test_build_single_guess_prompt_offers_stop_when_allowed():
     assert "ב" in system  # shown as already guessed correctly this round
 
 
+def test_build_single_guess_prompt_states_how_much_of_the_budget_is_left():
+    system, _ = build_single_guess_prompt(
+        ["א"], clue="אור", count=2, correct_so_far=["ב"], can_stop=True
+    )
+
+    assert "1 of at most 3" in system
+
+
+def test_build_single_guess_prompt_says_the_budget_is_a_ceiling_not_a_quota():
+    system, _ = build_single_guess_prompt(
+        ["א"], clue="אור", count=2, correct_so_far=["ב"], can_stop=True
+    )
+
+    assert "do not have to use" in system.lower()
+
+
+def test_build_single_guess_prompt_reports_no_cap_when_count_is_zero():
+    system, _ = build_single_guess_prompt(
+        ["א"], clue="אור", count=0, correct_so_far=["ב"], can_stop=True
+    )
+
+    assert "Guesses used this round: 1" in system
+    assert "at most" not in system.lower()
+
+
 def test_build_single_guess_prompt_includes_revealed_context():
     system, _ = build_single_guess_prompt(
         ["א"], clue="אור", count=1, correct_so_far=[], can_stop=False,

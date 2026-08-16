@@ -1,0 +1,28 @@
+# M2 CONTROL: same ambiguity ladder, but one fixed Guesser for every Codemaster.
+#
+# Companion to `m2_board_styles.yaml` (self-play). Holding the Guesser constant
+# is what makes a difference between models attributable to *Codemaster* skill
+# — the project's primary research question — rather than to the model being
+# better at both ends. Everything except `guesser_model` is identical to the
+# self-play config so the two runs are directly comparable.
+#
+# llama-3.3-70b is the fixed guesser for continuity: every earlier pilot run
+# used it, so this run stays comparable with that existing data. The known
+# caveat is that llama-as-Codemaster is then guessed by its own family; that
+# bias is precisely what the self-play run exists to cross-check.
+models:
+  - meta-llama/llama-3.3-70b-instruct
+  - qwen/qwen3.5-9b
+  - openai/gpt-4o-mini
+  - google/gemini-2.5-flash
+codemaster_prompt_methods:
+  - strong_hebrew
+  - translate_pipeline
+guesser_model: meta-llama/llama-3.3-70b-instruct
+board_styles:
+  - dual_0
+  - dual_50
+  - dual_80
+  - dual_100
+n_boards: 5
+n_trials: 1

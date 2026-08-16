@@ -1,3 +1,5 @@
+from collections import Counter
+
 import pytest
 
 from codenames_heb.board import Board
@@ -339,3 +341,84 @@ def test_llm_guesser_raw_response_is_none_for_local_validation_failure():
     assert excinfo.value.raw_response is None
     assert "not among currently guessable words" in str(excinfo.value)
     assert "not_on_board" in str(excinfo.value)
+
+
+# --- Corrective retries: a rejected attempt is re-asked WITH the reason ---
+
+
+def test_llm_codemaster_retry_prompt_names_the_rejection_reason():
+    client = FakeClient(
+        [
+            # Illegal: the clue is itself a board word.
+            {"clue": "ירח", "count": 1, "intended_targets": ["ירח"], "reasoning": "r"},
+            {"clue": "אור", "count": 1, "intended_targets": ["ירח"], "reasoning": "r"},
+        ]
+    )
+    codemaster = LLMCodemaster(client=client, model="m", method="strong_hebrew")
+
+    codemaster.give_clue(_board())
+
+    first_user = client.calls[0][2]
+    retry_user = client.calls[1][2]
+    # The first ask is clean; only the retry carries the correction, so the
+    # model is told what to fix instead of being re-asked identically.
+    assert "REJECTED" not in first_user
+    assert "REJECTED" in retry_user
+    assert "must not be a word already on the board" in retry_user
+    assert first_user != retry_user
+
+
+def test_llm_guesser_retry_prompt_names_the_reason_and_relists_legal_words():
+    client = FakeClient(
+        [
+            {"action": "guess", "word": "שמש"},  # not on the board
+            {"action": "guess", "word": "ירח"},
+        ]
+    )
+    guesser = LLMGuesser(client=client, model="m")
+
+    guesser.guess_one(["ירח", "ב"], clue="אור", count=1, correct_so_far=[])
+
+    retry_user = client.calls[1][2]
+    assert "REJECTED" in retry_user
+    assert "not among currently guessable words" in retry_user
+    assert "ירח" in retry_user and "ב" in retry_user
+
+
+def test_llm_codemaster_records_per_attempt_compliance_stats():
+    client = FakeClient(
+        [
+            {"clue": "ירח", "count": 1, "intended_targets": ["ירח"], "reasoning": "r"},
+            {"clue": "אור", "count": 1, "intended_targets": ["ירח"], "reasoning": "r"},
+        ]
+    )
+    codemaster = LLMCodemaster(client=client, model="m", method="strong_hebrew")
+    stats: Counter = Counter()
+
+    codemaster.give_clue(_board(), stats=stats)
+
+    assert stats["codemaster_attempts"] == 2
+    assert stats["codemaster_rejected"] == 1
+    assert stats["reason:clue_on_board"] == 1
+    assert stats["codemaster_call_failures"] == 0
+
+
+def test_llm_guesser_records_call_failure_when_retries_are_exhausted():
+    client = FakeClient([{"action": "guess", "word": "off_board"}] * 6)
+    guesser = LLMGuesser(client=client, model="m", max_retries=6)
+    stats: Counter = Counter()
+
+    with pytest.raises(FormatFailure):
+        guesser.guess_one(["ירח"], clue="אור", count=1, correct_so_far=[], stats=stats)
+
+    assert stats["guesser_attempts"] == 6
+    assert stats["guesser_rejected"] == 6
+    assert stats["guesser_call_failures"] == 1
+    assert stats["reason:guess_not_available"] == 6
+
+
+def test_adapters_default_to_six_retries():
+    # Raised from 3 after the 2026-08-16 pilot: with corrective feedback a
+    # model often needs more than one nudge to land a legal response.
+    assert LLMCodemaster(client=None, model="m", method="strong_hebrew").max_retries == 6
+    assert LLMGuesser(client=None, model="m").max_retries == 6

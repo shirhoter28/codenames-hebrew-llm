@@ -10,14 +10,37 @@ revealed immediately.
 Clue: {clue}
 Count: {count}
 Already guessed correctly this round: {correct_so_far}
+{budget_line}
 {revealed_section}
 Remaining board words you may guess: {words}
+
+If you guess, "word" must be copied exactly, character-for-character, from
+the "Remaining board words you may guess" list above — never a related,
+synonymous, or associated word that isn't in that exact list, even if it
+feels like a better match for the clue. If your best association isn't in
+the list, pick the closest word that IS in the list.
 
 {action_instructions}"""
 
 
 def _format_correct_so_far(correct_so_far: list[str]) -> str:
     return ", ".join(correct_so_far) if correct_so_far else "(none yet)"
+
+
+def _format_budget_line(count: int, correct_so_far: list[str]) -> str:
+    """State the guess budget explicitly every turn.
+
+    The rules block already defines it, but a model asked for one guess at a
+    time can't see how much of the budget it has spent — and reads the
+    clue's number as a quota it owes rather than a ceiling it may stop under.
+    """
+    used = len(correct_so_far)
+    if count == 0:
+        return f"Guesses used this round: {used} (a clue of 0 sets no guess limit)"
+    return (
+        f"Guesses used this round: {used} of at most {count + 1} "
+        f"(the clue's number, plus one bonus guess)"
+    )
 
 
 def _format_revealed_section(revealed: dict[str, str] | None) -> str:
@@ -37,6 +60,12 @@ def build_single_guess_prompt(
 ) -> tuple[str, str]:
     if can_stop:
         action_instructions = (
+            "Your guess budget above is a ceiling, not a quota: you do not "
+            "have to use all of it. "
+            "If you have already found the words this clue points to, or you "
+            "are not confident that another word fits it, stopping is the "
+            "better move — a wrong guess ends the round and may hit the "
+            "ASSASSIN, which loses the game outright.\n"
             'Respond with JSON only: {"action": "guess", "word": "..."} to guess a word, '
             'or {"action": "stop"} to stop guessing for this round.'
         )
@@ -50,11 +79,35 @@ def build_single_guess_prompt(
         clue=clue,
         count=count,
         correct_so_far=_format_correct_so_far(correct_so_far),
+        budget_line=_format_budget_line(count, correct_so_far),
         revealed_section=_format_revealed_section(revealed),
         words=", ".join(words),
         action_instructions=action_instructions,
     )
     return system, "Provide your next action now."
+
+
+def build_correction_note(error: str, words: list[str], can_stop: bool) -> str:
+    """Text appended to the user prompt when re-asking after a rejection.
+
+    Without this, a retry re-sends the identical prompt and the model has no
+    reason to answer differently — observed in the 2026-08-16 pilot, where a
+    guesser named the same off-board word on all three attempts.
+    """
+    actions = (
+        '{"action": "guess", "word": "..."} or {"action": "stop"}'
+        if can_stop
+        else '{"action": "guess", "word": "..."}'
+    )
+    return (
+        "\n\nYOUR PREVIOUS RESPONSE WAS REJECTED.\n"
+        f"Reason: {error}\n\n"
+        "Fix exactly that problem and answer again. Your guess must be one of "
+        "these words, copied exactly character-for-character — no synonyms, no "
+        "related words, nothing outside this list:\n"
+        f"{', '.join(words)}\n"
+        f"Respond with valid JSON only: {actions}"
+    )
 
 
 def parse_single_guess_response(data: dict) -> str | None:

@@ -66,7 +66,9 @@ def test_strong_hebrew_prompt_hides_unrevealed_roles_of_revealed_words():
 def test_strong_hebrew_prompt_omits_revealed_section_when_nothing_revealed():
     system, _ = build_strong_hebrew_prompt(_board())
 
-    assert "REVEALED_SO_FAR" not in system
+    # The strict-rules instructions reference the REVEALED_SO_FAR field name
+    # generically; what must be absent is an actual populated section.
+    assert "REVEALED_SO_FAR:" not in system
 
 
 def test_strong_hebrew_prompt_states_count_must_match_intended_targets():

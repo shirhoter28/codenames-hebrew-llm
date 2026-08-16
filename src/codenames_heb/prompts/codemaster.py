@@ -48,7 +48,11 @@ You are an expert Codemaster in Codenames, playing in Hebrew.
 
 Strict rules:
 1. Clue must be exactly one valid Hebrew word — no phrases, no punctuation,
-   not a word already on the board.
+   not a word already on the board. Before finalizing, compare your clue
+   character-by-character against every word listed above (YOUR_WORDS,
+   OPPONENT_WORDS, CIVILIAN_WORDS, ASSASSIN_WORD, and REVEALED_SO_FAR if
+   present) — if it exactly matches any of them, you must pick a different
+   clue.
 2. Clue must not be a morphological derivative/inflection of any board word
    (shared root or binyan that makes the link mechanical rather than semantic).
 3. Before answering, check the clue's association strength against EVERY
@@ -56,7 +60,10 @@ Strict rules:
    strongly linked to the clue as your intended targets, pick a different
    clue or drop that target.
 4. Only include a word in intended_targets if you're confident a guesser
-   could find it from the clue alone with no other help.
+   could find it from the clue alone with no other help. Every word in
+   intended_targets must be copied exactly, character-for-character, from
+   YOUR_WORDS above — never a related or synonymous word that merely sounds
+   right.
 5. `count` must equal exactly the number of words in `intended_targets` —
    no more, no fewer.
 {required_count_line}
@@ -83,7 +90,12 @@ You are an expert Codemaster in Codenames, playing in Hebrew.
 First translate all board words to English internally. Think as a
 Codemaster playing in English and choose your target words and English
 clue. Then translate that English clue into one Hebrew word for your
-final answer. `count` must equal exactly the number of words in
+final answer. Before finalizing, compare your final Hebrew clue
+character-by-character against every word listed above (YOUR_WORDS,
+OPPONENT_WORDS, CIVILIAN_WORDS, ASSASSIN_WORD, and REVEALED_SO_FAR if
+present) — if it exactly matches any of them, pick a different clue. Every
+word in intended_targets must be copied exactly, character-for-character,
+from YOUR_WORDS above. `count` must equal exactly the number of words in
 `intended_targets` — no more, no fewer.
 {required_count_line}
 Respond with JSON only: {{"clue": "...", "count": <int>,
@@ -128,6 +140,29 @@ def parse_codemaster_response(data: dict) -> CodemasterResponse:
         translation_map=data.get("translation_map"),
         en_clue=data.get("en_clue"),
         en_targets=data.get("en_targets"),
+    )
+
+
+def build_correction_note(
+    error: str, board: Board, revealed: dict[str, str] | None = None
+) -> str:
+    """Text appended to the user prompt when re-asking after a rejection.
+
+    Without this, a retry re-sends the identical prompt and the model has no
+    reason to answer differently — observed in the 2026-08-16 pilot, where
+    all retries failed with the same error as the first attempt.
+    """
+    revealed = revealed or {}
+    available_targets = [w for w in board.words_with_role("target") if w not in revealed]
+    return (
+        "\n\nYOUR PREVIOUS RESPONSE WAS REJECTED.\n"
+        f"Reason: {error}\n\n"
+        "Fix exactly that problem and answer again. Reminders:\n"
+        f"- Your clue must NOT be any of these board words: {', '.join(board.words)}\n"
+        "- Every entry in intended_targets must be copied exactly, "
+        f"character-for-character, from: {', '.join(available_targets)}\n"
+        "- count must equal exactly the number of entries in intended_targets.\n"
+        "Respond with valid JSON only, in the format given above."
     )
 
 
