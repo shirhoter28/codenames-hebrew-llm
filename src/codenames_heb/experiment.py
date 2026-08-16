@@ -1,7 +1,10 @@
 import csv
 import json
+import threading
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from itertools import zip_longest
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -196,6 +199,11 @@ class ExperimentConfig:
     board_styles: list[str]
     n_boards: int
     n_trials: int
+    # Concurrent games. Defaults to 1 so a run is only ever parallel by
+    # explicit choice. Keep it <= len(models): the dispatcher interleaves by
+    # model so each in-flight game hits a different provider, and going wider
+    # doubles workers onto the same provider, which is where 429s return.
+    max_workers: int = 1
 
 
 _REQUIRED_CONFIG_KEYS = (
@@ -255,6 +263,19 @@ def load_config(path) -> ExperimentConfig:
         if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
             raise ValueError(f"Config {path}: {key} must be a positive integer, got {value!r}")
 
+    max_workers = data.get("max_workers", 1)
+    if not isinstance(max_workers, int) or isinstance(max_workers, bool) or max_workers <= 0:
+        raise ValueError(
+            f"Config {path}: max_workers must be a positive integer, got {max_workers!r}"
+        )
+    if max_workers > len(data["models"]):
+        raise ValueError(
+            f"Config {path}: max_workers ({max_workers}) exceeds the number of models "
+            f"({len(data['models'])}). Work is interleaved by model so that concurrent "
+            f"games hit different providers; more workers than models puts several on "
+            f"the same provider, which is what triggers rate limiting."
+        )
+
     return ExperimentConfig(
         models=data["models"],
         codemaster_prompt_methods=methods,
@@ -262,6 +283,7 @@ def load_config(path) -> ExperimentConfig:
         board_styles=styles,
         n_boards=data["n_boards"],
         n_trials=data["n_trials"],
+        max_workers=max_workers,
     )
 
 
@@ -327,6 +349,38 @@ def _play_round(
 
 
 def run_game(
+    codemaster: Codemaster,
+    guesser: Guesser,
+    board: Board,
+    model: str,
+    method: str,
+    trial: int,
+    call_delay: float = 0.0,
+    max_rounds: int | None = None,
+    guesser_model: str | None = None,
+) -> dict:
+    """Play one game, timing it.
+
+    Timing is attached here rather than inside `_play_game` so that every
+    exit path carries it, including the error returns. Once games run
+    concurrently, wall-clock/n_games no longer gives per-game duration, and
+    `duration_s` is the only way to tell provider throttling (one model's
+    games slow down, rejections stay flat) from genuine non-compliance.
+    """
+    started_at = datetime.now(timezone.utc)
+    t0 = time.monotonic()
+    row = _play_game(
+        codemaster, guesser, board, model, method, trial,
+        call_delay, max_rounds, guesser_model,
+    )
+    return {
+        **row,
+        "started_at": started_at.isoformat(),
+        "duration_s": round(time.monotonic() - t0, 3),
+    }
+
+
+def _play_game(
     codemaster: Codemaster,
     guesser: Guesser,
     board: Board,
@@ -467,16 +521,29 @@ _CSV_FIELDNAMES = [
     "guesser_rejected",
     "guesser_compliance_rate",
     "guesser_call_failures",
+    "started_at",
+    "duration_s",
     "terminal_error",
     "error",
 ]
 
+# Rows are written to raw.jsonl in completion order once games run
+# concurrently, so the rolled-up CSV is sorted to stay deterministic and
+# diffable across runs.
+_CSV_SORT_KEY = ("model", "method", "board_style", "board_seed", "trial")
+
 
 def _write_metrics_csv(rows: list[dict], path: Path) -> None:
+    ordered = sorted(
+        rows,
+        # "" keeps rows sortable when a key is absent (error rows) or None
+        # (board_style on older runs) — mixed None/str would raise.
+        key=lambda r: tuple(str(r.get(k) or "") for k in _CSV_SORT_KEY),
+    )
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=_CSV_FIELDNAMES, extrasaction="ignore")
         writer.writeheader()
-        for row in rows:
+        for row in ordered:
             writer.writerow(row)
 
 
@@ -491,7 +558,11 @@ def _board_to_dict(board: Board) -> dict:
 
 
 def _write_run_manifest(
-    run_dir: Path, boards: list[Board], config: ExperimentConfig, config_path
+    run_dir: Path,
+    boards: list[Board],
+    config: ExperimentConfig,
+    config_path,
+    max_workers: int = 1,
 ) -> None:
     """Persist the exact boards used and the config, so a run is self-describing."""
     (run_dir / "boards.json").write_text(
@@ -503,6 +574,35 @@ def _write_run_manifest(
     else:
         content = yaml.safe_dump(asdict(config), allow_unicode=True, sort_keys=False)
     (run_dir / "config.yaml").write_text(content, encoding="utf-8")
+    # Recorded separately because it can be overridden per invocation, and
+    # because `duration_s` is uninterpretable without knowing how many games
+    # were competing for bandwidth alongside it.
+    (run_dir / "run_meta.json").write_text(
+        json.dumps({"max_workers": max_workers}, indent=2), encoding="utf-8"
+    )
+
+
+def _ordered_tasks(config: ExperimentConfig, boards: list[Board]) -> list[tuple]:
+    """One task per game, interleaved round-robin by model.
+
+    Ordering is the rate-limit safety mechanism. Each model sits behind a
+    different upstream provider, so dispatching model-by-model would point
+    every concurrent worker at the SAME provider — the concentrated-burst
+    pattern that killed a 180-game run with HTTP 429 (DECISIONS.md,
+    2026-08-10). Interleaving means the `max_workers` tasks in flight hit
+    `max_workers` different providers, so per-provider request rate is
+    unchanged from a sequential run even as total throughput rises.
+    """
+    per_model: list[list[tuple]] = []
+    for model in config.models:
+        tasks = [
+            (model, method, board, trial)
+            for method in config.codemaster_prompt_methods
+            for board in boards
+            for trial in range(config.n_trials)
+        ]
+        per_model.append(tasks)
+    return [t for group in zip_longest(*per_model) for t in group if t is not None]
 
 
 def run_experiment(
@@ -513,7 +613,12 @@ def run_experiment(
     results_dir,
     config_path=None,
     trial_delay: float = 3.0,
+    max_workers: int | None = None,
 ) -> Path:
+    # Explicit argument wins; otherwise the config's value, defaulting to
+    # sequential so nothing becomes concurrent by accident.
+    if max_workers is None:
+        max_workers = config.max_workers
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     run_dir = Path(results_dir) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -524,33 +629,79 @@ def run_experiment(
         for i in range(config.n_boards)
     ]
 
-    _write_run_manifest(run_dir, boards, config, config_path)
+    _write_run_manifest(run_dir, boards, config, config_path, max_workers)
+
+    # Adapters are built up front, sequentially, rather than lazily inside
+    # workers: construction order and count stay deterministic, and no two
+    # threads race to build the same one.
+    guessers: dict[str, Guesser] = {}
+    guesser_models: dict[str, str] = {}
+    codemasters: dict[tuple[str, str], Codemaster] = {}
+    for model in config.models:
+        # Under self-play the guesser changes with the codemaster, so it is
+        # rebuilt per model rather than once for the whole run.
+        guesser_models[model] = (
+            model if config.guesser_model == SAME_AS_CODEMASTER else config.guesser_model
+        )
+        guessers[model] = make_guesser(guesser_models[model])
+        for method in config.codemaster_prompt_methods:
+            codemasters[(model, method)] = make_codemaster(model, method)
+
+    tasks = _ordered_tasks(config, boards)
+    total = len(tasks)
+
+    def play(task: tuple) -> dict:
+        model, method, board, trial = task
+        try:
+            return run_game(
+                codemasters[(model, method)],
+                guessers[model],
+                board,
+                model,
+                method,
+                trial,
+                call_delay=trial_delay,
+                guesser_model=guesser_models[model],
+            )
+        except Exception as exc:  # a poisoned task must not take down the pool
+            return {
+                "model": model,
+                "method": method,
+                "guesser_model": guesser_models[model],
+                "board_seed": board.seed,
+                "board_style": board.style,
+                "trial": trial,
+                "status": "error",
+                "stage": "runner",
+                "error": f"{type(exc).__name__}: {exc}",
+                "rounds": [],
+            }
 
     rows: list[dict] = []
+    write_lock = threading.Lock()
     with (run_dir / "raw.jsonl").open("w", encoding="utf-8") as raw_file:
-        for model in config.models:
-            # Under self-play the guesser changes with the codemaster, so it is
-            # rebuilt per model rather than once for the whole run.
-            guesser_model = (
-                model if config.guesser_model == SAME_AS_CODEMASTER else config.guesser_model
-            )
-            guesser = make_guesser(guesser_model)
-            for method in config.codemaster_prompt_methods:
-                codemaster = make_codemaster(model, method)
-                for board in boards:
-                    for trial in range(config.n_trials):
-                        row = run_game(
-                            codemaster,
-                            guesser,
-                            board,
-                            model,
-                            method,
-                            trial,
-                            call_delay=trial_delay,
-                            guesser_model=guesser_model,
-                        )
-                        raw_file.write(json.dumps(row, ensure_ascii=False) + "\n")
-                        rows.append(row)
+
+        def record(row: dict) -> None:
+            # Flushed on every row: an unattended multi-hour run must not lose
+            # completed games to a buffer on a hard kill, and progress has to
+            # be observable while it runs.
+            with write_lock:
+                raw_file.write(json.dumps(row, ensure_ascii=False) + "\n")
+                raw_file.flush()
+                rows.append(row)
+                print(
+                    f"[{len(rows):>5}/{total}] {row['model']} {row.get('board_style')} "
+                    f"{row['method']} -> {row.get('outcome') or row.get('status')}",
+                    flush=True,
+                )
+
+        if max_workers <= 1:
+            for task in tasks:
+                record(play(task))
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                for future in as_completed(pool.submit(play, t) for t in tasks):
+                    record(future.result())
 
     _write_metrics_csv(rows, run_dir / "metrics.csv")
     return run_dir

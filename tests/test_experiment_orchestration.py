@@ -518,6 +518,8 @@ def test_run_experiment_writes_expected_number_of_rows(tmp_path):
             "guesser_rejected",
             "guesser_compliance_rate",
             "guesser_call_failures",
+            "started_at",
+            "duration_s",
             "terminal_error",
             "error",
         ]

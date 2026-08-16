@@ -16,6 +16,7 @@ def main(
     config_path: Path = DEFAULT_CONFIG_PATH,
     results_dir: Path = DEFAULT_RESULTS_DIR,
     client: OpenRouterClient | None = None,
+    max_workers: int | None = None,
 ) -> Path:
     config = load_config(config_path)
     word_lists = load_word_lists()
@@ -30,6 +31,8 @@ def main(
         make_guesser=lambda model: LLMGuesser(client=client, model=model),
         results_dir=results_dir,
         config_path=config_path,
+        # None falls through to the config's own value.
+        max_workers=max_workers,
     )
     print(f"Results written to {run_dir}")
     return run_dir
