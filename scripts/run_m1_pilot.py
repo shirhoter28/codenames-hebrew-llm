@@ -1,3 +1,4 @@
+import argparse
 import sys
 from pathlib import Path
 
@@ -38,5 +39,36 @@ def main(
     return run_dir
 
 
+def _parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Run a Codenames-Hebrew experiment from a config file.",
+        epilog=(
+            "example: python scripts/run_m1_pilot.py configs/m2_tournament.yaml"
+        ),
+    )
+    parser.add_argument(
+        "config", nargs="?", type=Path, default=DEFAULT_CONFIG_PATH,
+        help=f"experiment config (default: {DEFAULT_CONFIG_PATH.name})",
+    )
+    parser.add_argument(
+        "--results-dir", type=Path, default=DEFAULT_RESULTS_DIR,
+        help="where to write results/<run_id> (default: results/)",
+    )
+    parser.add_argument(
+        "--max-workers", type=int, default=None,
+        help=(
+            "games to run concurrently, overriding the config. Capped at the "
+            "number of models, because tasks are dispatched round-robin by "
+            "model so concurrent games hit different providers."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
 if __name__ == "__main__":
-    main()
+    args = _parse_args()
+    main(
+        config_path=args.config,
+        results_dir=args.results_dir,
+        max_workers=args.max_workers,
+    )

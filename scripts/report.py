@@ -224,9 +224,16 @@ def build_report(data, figure_paths: dict, run_label: str) -> str:
             "The same projection for the comparisons actually of interest, each of "
             "which collapses over the other two factors and so pools far more games "
             "per arm. Size the run from this table: pick the comparison that has to "
-            "come out conclusive, find the smallest `games_per_cell` whose "
-            "`mdd_win_rate` is below the effect you care about, then read the cost "
-            "off the per-cell table above.",
+            "come out conclusive, find the smallest `games_per_cell` whose `mdd_*` "
+            "is below the effect you care about, then read the cost off the per-cell "
+            "table above.\n\n"
+            "**Which outcome variable you size against changes the answer by a large "
+            "factor.** `mdd_win_rate` and `mdd_first_guess_lift` are both reported "
+            "because first-guess lift separates the models far more sharply than "
+            "win rate does, so a run sized to resolve win rate is several times "
+            "larger than one sized to resolve lift. Compare each `mdd_*` against the "
+            "observed spread in that same metric from the tables above, not across "
+            "metrics.",
         )
     )
 

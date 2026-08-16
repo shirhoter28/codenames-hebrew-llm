@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import math
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -208,6 +208,18 @@ def summarize(
     return out.drop(columns=["_all"]) if not group_cols else out
 
 
+# Outcome variables a run can be sized against, mapped to their column label.
+# Which one you pick changes the answer by a large factor: first-guess lift
+# separates the models by roughly 8 SE on the 2026-08-16 run where win rate
+# separates them by about one, so a run sized to resolve win rate is far larger
+# than one sized to resolve lift. Both are reported so the choice is explicit.
+POWER_METRICS = {
+    "is_win": "win_rate",
+    "first_guess_lift": "first_guess_lift",
+    "game_length": "game_length",
+}
+
+
 def scaling_projection(
     games: pd.DataFrame,
     candidate_ns: Sequence[int] = (5, 10, 20, 40),
@@ -225,25 +237,22 @@ def scaling_projection(
     cells = completed.groupby(cell_cols, dropna=False, observed=True)
     n_cells = cells.ngroups
 
-    win_var = _pooled_variance(cells["is_win"])
-    length_var = _pooled_variance(cells["game_length"])
+    variances = {
+        label: _pooled_variance(cells[metric])
+        for metric, label in POWER_METRICS.items()
+        if metric in completed.columns
+    }
     calls_per_game = completed["total_api_calls"].mean()
 
     detect = Z_95 + Z_POWER_80
     rows = []
     for n in candidate_ns:
-        rows.append(
-            {
-                "games_per_cell": n,
-                "n_cells": n_cells,
-                "games_total": n * n_cells,
-                "win_rate_ci_halfwidth": Z_95 * math.sqrt(win_var / n),
-                "game_length_ci_halfwidth": Z_95 * math.sqrt(length_var / n),
-                "mdd_win_rate": detect * math.sqrt(2 * win_var / n),
-                "mdd_game_length": detect * math.sqrt(2 * length_var / n),
-                "api_calls_total": n * n_cells * calls_per_game,
-            }
-        )
+        row = {"games_per_cell": n, "n_cells": n_cells, "games_total": n * n_cells}
+        for label, var in variances.items():
+            row[f"{label}_ci_halfwidth"] = Z_95 * math.sqrt(var / n)
+            row[f"mdd_{label}"] = detect * math.sqrt(2 * var / n)
+        row["api_calls_total"] = n * n_cells * calls_per_game
+        rows.append(row)
     return pd.DataFrame(rows)
 
 
@@ -265,12 +274,12 @@ def comparison_power(
     design_cols = [c for c in design_cols if c in completed.columns]
     n_cells = completed.groupby(design_cols, dropna=False, observed=True).ngroups
 
-    win_var = _pooled_variance(
-        completed.groupby(design_cols, dropna=False, observed=True)["is_win"]
-    )
-    length_var = _pooled_variance(
-        completed.groupby(design_cols, dropna=False, observed=True)["game_length"]
-    )
+    cells = completed.groupby(design_cols, dropna=False, observed=True)
+    variances = {
+        label: _pooled_variance(cells[metric])
+        for metric, label in POWER_METRICS.items()
+        if metric in completed.columns
+    }
     detect = Z_95 + Z_POWER_80
 
     rows = []
@@ -289,8 +298,10 @@ def comparison_power(
                     "levels": n_levels,
                     "games_per_cell": n,
                     "games_per_arm": per_arm,
-                    "mdd_win_rate": detect * math.sqrt(2 * win_var / per_arm),
-                    "mdd_game_length": detect * math.sqrt(2 * length_var / per_arm),
+                    **{
+                        f"mdd_{label}": detect * math.sqrt(2 * var / per_arm)
+                        for label, var in variances.items()
+                    },
                 }
             )
     return pd.DataFrame(rows)
@@ -318,6 +329,12 @@ class RunData:
     boards: dict
     configs: dict
     run_ids: tuple
+    # {run_id: run_meta.json}. Holds `max_workers`, without which `duration_s`
+    # cannot be read: a game is slow because the provider throttled it or
+    # because 4 other games were competing for bandwidth, and only the worker
+    # count distinguishes those. Empty for runs written before the parallel
+    # runner existed.
+    meta: dict = field(default_factory=dict)
 
 
 def load_run(run_dir) -> RunData:
@@ -338,6 +355,7 @@ def load_run(run_dir) -> RunData:
 
     boards = _load_boards(run_dir / "boards.json")
     config = _load_config(run_dir / "config.yaml")
+    meta = _load_meta(run_dir / "run_meta.json")
 
     game_records = []
     round_records = []
@@ -346,14 +364,18 @@ def load_run(run_dir) -> RunData:
         game_records.append(game)
         round_records.extend(rounds)
 
-    games = pd.DataFrame(game_records)
-    rounds = pd.DataFrame(round_records)
+    # Under `max_workers > 1` raw.jsonl is written in completion order, which
+    # is non-deterministic. Sorting here keeps every table and report stable
+    # across reruns of the same experiment.
+    games = _sort_by_game(pd.DataFrame(game_records))
+    rounds = _sort_by_game(pd.DataFrame(round_records), extra=["round"])
     return RunData(
         games=games,
         rounds=rounds,
         boards={run_id: boards},
         configs={run_id: config},
         run_ids=(run_id,),
+        meta={run_id: meta},
     )
 
 
@@ -371,12 +393,17 @@ def load_runs(run_dirs: Iterable) -> RunData:
         boards.update(data.boards)
         configs.update(data.configs)
 
+    meta: dict = {}
+    for data in loaded:
+        meta.update(data.meta)
+
     return RunData(
         games=pd.concat([d.games for d in loaded], ignore_index=True),
         rounds=pd.concat([d.rounds for d in loaded], ignore_index=True),
         boards=boards,
         configs=configs,
         run_ids=tuple(rid for d in loaded for rid in d.run_ids),
+        meta=meta,
     )
 
 
@@ -398,6 +425,20 @@ def _load_boards(path: Path) -> dict:
         (board.get("style") or UNSPECIFIED_STYLE, board["seed"]): board
         for board in boards
     }
+
+
+def _sort_by_game(frame: pd.DataFrame, extra: list | None = None) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    keys = [c for c in GAME_KEY + (extra or []) if c in frame.columns]
+    return frame.sort_values(keys, kind="stable").reset_index(drop=True)
+
+
+def _load_meta(path: Path) -> dict:
+    """`run_meta.json`, written only by the parallel runner."""
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _load_config(path: Path) -> dict:
@@ -442,6 +483,9 @@ def _build_game(row: dict, run_id: str, boards: dict, config: dict):
         "target_recovery_rate": row.get("target_recovery_rate"),
         "assassin_hit": row.get("assassin_hit"),
         "terminal_error": row.get("terminal_error") or row.get("error"),
+        # Written only by the parallel runner; absent on earlier runs.
+        "started_at": row.get("started_at"),
+        "duration_s": row.get("duration_s"),
         **{col: row.get(col) for col in _COMPLIANCE_COLUMNS},
         "total_api_calls": (row.get("codemaster_attempts") or 0)
         + (row.get("guesser_attempts") or 0),
@@ -772,7 +816,7 @@ def compliance_table(games: pd.DataFrame, group_cols: Sequence[str]) -> pd.DataF
         games,
         group_cols,
         ["codemaster_compliance_rate", "guesser_compliance_rate",
-         "codemaster_call_failures", "total_api_calls"],
+         "codemaster_call_failures", "total_api_calls", "duration_s"],
     ).rename(columns={"n": "n_games"})
 
     keep = group_cols + [
@@ -780,6 +824,7 @@ def compliance_table(games: pd.DataFrame, group_cols: Sequence[str]) -> pd.DataF
         "codemaster_compliance_rate_mean", "codemaster_compliance_rate_se",
         "guesser_compliance_rate_mean", "guesser_compliance_rate_se",
         "codemaster_call_failures_mean", "total_api_calls_mean",
+        "duration_s_mean", "duration_s_se",
     ]
     out = out[[c for c in keep if c in out.columns]]
 

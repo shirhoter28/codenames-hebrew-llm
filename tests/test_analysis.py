@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from codenames_heb.analysis import (
+    comparison_power,
     STOP_CLASSES,
     classify_stop,
     intended_overlap,
@@ -438,6 +439,70 @@ def test_game_level_lift_averages_within_the_game_first(tmp_path):
 
 
 # --- scaling_projection --------------------------------------------------
+
+
+def test_parallel_runner_telemetry_is_loaded_when_present(tmp_path):
+    run_dir = _write_run(
+        tmp_path, [_game(rounds=[_round()], started_at="2026-08-16T03:56:09Z",
+                         duration_s=41.2)]
+    )
+    (run_dir / "run_meta.json").write_text('{"max_workers": 4}', encoding="utf-8")
+
+    data = load_run(run_dir)
+
+    assert data.games.loc[0, "duration_s"] == 41.2
+    # duration_s cannot be read without knowing how many games competed for
+    # bandwidth alongside it.
+    assert data.meta[run_dir.name]["max_workers"] == 4
+
+
+def test_runs_without_telemetry_still_load(tmp_path):
+    # Every run written before the parallel runner existed.
+    run_dir = _write_run(tmp_path, [_game(rounds=[_round()])])
+
+    data = load_run(run_dir)
+
+    assert pd.isna(data.games.loc[0, "duration_s"])
+    assert data.meta[run_dir.name] == {}
+
+
+def test_tables_are_sorted_so_completion_order_does_not_leak_in(tmp_path):
+    # Under max_workers > 1 raw.jsonl is written in completion order, which is
+    # non-deterministic. Reports must not change shape between reruns.
+    shuffled = [
+        _game(board_seed=2, trial=0, rounds=[_round()]),
+        _game(board_seed=0, trial=1, rounds=[_round()]),
+        _game(board_seed=0, trial=0, rounds=[_round()]),
+    ]
+    run_dir = _write_run(tmp_path, shuffled)
+
+    games = load_run(run_dir).games
+
+    assert list(zip(games["board_seed"], games["trial"])) == [(0, 0), (0, 1), (2, 0)]
+
+
+def test_power_tables_report_every_outcome_variable_a_run_can_be_sized_against():
+    # Sizing a run against win rate rather than first-guess lift changes the
+    # answer by a large factor, so both must be visible side by side.
+    games = pd.DataFrame(
+        {
+            "model": ["a"] * 4 + ["b"] * 4,
+            "method": ["strong_hebrew"] * 8,
+            "board_style": ["dual_0"] * 8,
+            "completed": [True] * 8,
+            "is_win": [1.0, 0.0, 1.0, 0.0] * 2,
+            "first_guess_lift": [0.5, 0.3, 0.4, 0.2] * 2,
+            "game_length": [4.0, 6.0, 8.0, 10.0] * 2,
+            "total_api_calls": [20.0] * 8,
+        }
+    )
+
+    out = comparison_power(games, candidate_ns=(5,))
+
+    assert {"mdd_win_rate", "mdd_first_guess_lift", "mdd_game_length"} <= set(out.columns)
+    # Lift varies far less within a cell than a win/loss coin flip does, so it
+    # needs a much smaller run to resolve the same-sized effect.
+    assert out.loc[0, "mdd_first_guess_lift"] < out.loc[0, "mdd_win_rate"]
 
 
 def test_scaling_projection_narrows_the_interval_as_games_per_cell_grow():
