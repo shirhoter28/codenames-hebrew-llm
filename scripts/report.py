@@ -32,13 +32,105 @@ from codenames_heb.analysis import (  # noqa: E402
 # Every table is emitted collapsed *and* stratified by board style: style is
 # the designed independent variable, and an effect that reverses direction
 # across the ladder disappears when it is collapsed away.
-_STRATA = {
-    "by model": ["model"],
-    "by model x prompt method": ["model", "method"],
-    "by board style": ["board_style"],
-    "by model x board style": ["model", "board_style"],
-    "by model x method x board style": ["model", "method", "board_style"],
+_CANDIDATE_STRATA = (
+    ["model"],
+    ["guesser_model"],
+    ["model", "guesser_model"],
+    ["model", "method"],
+    ["board_style"],
+    ["model", "board_style"],
+    ["guesser_model", "board_style"],
+    ["model", "guesser_model", "board_style"],
+    ["model", "method", "board_style"],
+)
+
+# "model" alone stopped being self-explanatory once guessers are models too.
+_FACTOR_LABELS = {
+    "model": "codemaster",
+    "guesser_model": "guesser",
+    "method": "prompt method",
+    "board_style": "board style",
 }
+
+
+def _strata(games: pd.DataFrame) -> dict:
+    """The stratifications this run can actually support.
+
+    A factor with a single level carries no comparison, and nesting it produces
+    a table identical to the one without it under a heading that implies a
+    contrast the run cannot make — a fixed-guesser run must not advertise a
+    "by guesser" table, and a single-method run must not repeat "by codemaster"
+    four times. Degenerate factors are dropped and the survivors de-duplicated.
+    """
+    varying = {
+        column
+        for column in _FACTOR_LABELS
+        if column in games.columns and games[column].nunique(dropna=False) > 1
+    }
+
+    strata: dict = {}
+    seen: set = set()
+    for columns in _CANDIDATE_STRATA:
+        kept = [c for c in columns if c in varying]
+        if not kept or tuple(kept) in seen:
+            continue
+        seen.add(tuple(kept))
+        strata["by " + " x ".join(_FACTOR_LABELS[c] for c in kept)] = kept
+    return strata
+
+
+def _design_cols(games: pd.DataFrame) -> tuple:
+    """The factors this run actually varies.
+
+    Sizing must be told the real design. A factor left out of `cell_cols` has
+    its effect absorbed into within-cell variance, which inflates every
+    detectable difference and over-buys the next run; a factor with one level
+    left *in* splits the data for nothing.
+    """
+    return tuple(
+        column
+        for column in ("model", "guesser_model", "method", "board_style")
+        if column in games.columns and games[column].nunique(dropna=False) > 1
+    )
+
+
+def _comparisons(games: pd.DataFrame) -> list:
+    """Main effects, plus the codemaster x guesser cell when the grid is crossed."""
+    comparisons: list = list(_design_cols(games))
+    if "model" in comparisons and "guesser_model" in comparisons:
+        comparisons.append(("model", "guesser_model"))
+    return comparisons
+
+
+def _varies(frame: pd.DataFrame, column: str) -> bool:
+    return column in frame.columns and frame[column].nunique(dropna=False) > 1
+
+
+def _actor(frame: pd.DataFrame) -> str:
+    """Whose behaviour a guesser-side table should be attributed to.
+
+    Stopping early, taking the bonus guess and missing are the guesser's
+    decisions, so a crossed run groups them by guesser. A fixed-guesser run has
+    only one, and grouping by it would collapse the table to a single row —
+    there the codemaster is the only thing that varies, and its clue counts
+    still shape what the guesser could do.
+    """
+    return "guesser_model" if _varies(frame, "guesser_model") else "model"
+
+
+def _stop_group(rounds: pd.DataFrame) -> list:
+    return [_actor(rounds), "board_style"]
+
+
+def _miss_group(rounds: pd.DataFrame) -> str:
+    return _actor(rounds)
+
+
+def _role_compliance(games: pd.DataFrame, group_col: str, role: str) -> pd.DataFrame:
+    """One role's compliance columns, grouped by the model that played it."""
+    table = compliance_table(games, [group_col])
+    other = "guesser" if role == "codemaster" else "codemaster"
+    return table.drop(columns=[c for c in table.columns if c.startswith(other)])
 
 
 def _cell(value) -> str:
@@ -80,7 +172,14 @@ def _fmt(df: pd.DataFrame, drop: list | None = None) -> str:
     if "board_style" in out.columns:
         order = style_order(out["board_style"].dropna().unique())
         out["board_style"] = pd.Categorical(out["board_style"], categories=order, ordered=True)
-        sort_by = [c for c in ("model", "method", "board_style") if c in out.columns]
+    # Sorting must not depend on a board_style column being present, or a
+    # "by codemaster x guesser" table comes out in groupby order.
+    sort_by = [
+        c
+        for c in ("model", "guesser_model", "method", "board_style")
+        if c in out.columns
+    ]
+    if sort_by:
         out = out.sort_values(sort_by)
     return _to_markdown(out)
 
@@ -147,7 +246,9 @@ def build_report(data, figure_paths: dict, run_label: str) -> str:
         "",
     ]
 
-    for label, group in _STRATA.items():
+    strata = _strata(games)
+
+    for label, group in strata.items():
         lines.append(
             _section(
                 f"Game outcomes — {label}",
@@ -159,7 +260,7 @@ def build_report(data, figure_paths: dict, run_label: str) -> str:
             )
         )
 
-    for label, group in _STRATA.items():
+    for label, group in strata.items():
         lines.append(
             _section(
                 f"Round metrics — {label}",
@@ -176,21 +277,37 @@ def build_report(data, figure_paths: dict, run_label: str) -> str:
     lines.append(
         _section(
             "Stop behaviour — counts and shares",
-            _fmt(stop_class_table(rounds, ["model", "board_style"])),
+            _fmt(stop_class_table(rounds, _stop_group(rounds))),
+            "Grouped by *guesser*: stopping early, taking the bonus guess and "
+            "missing before quota are all decisions the guesser makes, so "
+            "grouping them by codemaster attributes them to the wrong player."
+            if _varies(rounds, "guesser_model")
+            else "Grouped by codemaster: this run held the guesser fixed, so the "
+            "codemaster's clue counts are the only thing shaping these rounds.",
         )
     )
     lines.append(
         _section(
-            "Compliance and retries",
-            _fmt(compliance_table(games, ["model"])),
+            "Codemaster compliance and retries",
+            _fmt(_role_compliance(games, "model", "codemaster")),
             "Per-*call* compliance. A model that only produces a legal clue after "
             "several corrective retries is less reliable than one that gets it right "
             "first time, even at an equal win rate.",
         )
     )
+    lines.append(
+        _section(
+            "Guesser compliance and retries",
+            _fmt(_role_compliance(games, "guesser_model", "guesser")),
+            "Grouped by guesser, which is one row when the guesser is fixed. "
+            "Compliance is a property of the model doing the calling, so "
+            "grouping the guesser's by *codemaster* would average over whichever "
+            "guessers that codemaster happened to be paired with.",
+        )
+    )
 
     boards = {k: v for board in data.boards.values() for k, v in board.items()}
-    lift = dual_miss_lift(rounds, boards, ["board_style", "model"])
+    lift = dual_miss_lift(rounds, boards, ["board_style", _miss_group(rounds)])
     if not lift.empty:
         lines.append(
             _section(
@@ -206,7 +323,7 @@ def build_report(data, figure_paths: dict, run_label: str) -> str:
     lines.append(
         _section(
             "How large should the next run be? — per design cell",
-            _fmt(scaling_projection(games)),
+            _fmt(scaling_projection(games, cell_cols=_design_cols(games))),
             "Projected from this run's own within-cell variance. "
             "`games_per_cell` = `n_boards x n_trials` for each "
             "(model, method, board_style) cell. `*_ci_halfwidth` is the 95% "
@@ -220,7 +337,7 @@ def build_report(data, figure_paths: dict, run_label: str) -> str:
     lines.append(
         _section(
             "How large should the next run be? — per comparison",
-            _fmt(comparison_power(games)),
+            _fmt(comparison_power(games, design_cols=_design_cols(games), comparisons=_comparisons(games))),
             "The same projection for the comparisons actually of interest, each of "
             "which collapses over the other two factors and so pools far more games "
             "per arm. Size the run from this table: pick the comparison that has to "

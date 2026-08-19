@@ -63,6 +63,25 @@ def _model_order(df: pd.DataFrame) -> list:
     return sorted(df["model"].dropna().unique())
 
 
+def _level_order(df: pd.DataFrame, column: str) -> list:
+    return sorted(df[column].dropna().unique())
+
+
+def _varies(df: pd.DataFrame, column: str) -> bool:
+    return column in df.columns and df[column].nunique(dropna=False) > 1
+
+
+def _actor_column(df: pd.DataFrame) -> str:
+    """Which model a guesser-side figure should be grouped by.
+
+    Stops, misses and bonus guesses are the guesser's decisions, so a crossed
+    run attributes them to the guesser. A fixed-guesser run has only one, and
+    grouping by it would collapse the figure to a single bar — there the
+    codemaster is the only thing varying.
+    """
+    return "guesser_model" if _varies(df, "guesser_model") else "model"
+
+
 def _colors_for(models: Sequence) -> dict:
     return {m: _MODEL_COLORS[i % len(_MODEL_COLORS)] for i, m in enumerate(models)}
 
@@ -347,17 +366,23 @@ def fig_ambiguity_ladder(games: pd.DataFrame):
 def fig_stop_behaviour(rounds: pd.DataFrame):
     """How each round ended, as within-model shares.
 
+    Grouped by whoever is varying in the *guesser* seat: stopping early,
+    taking the bonus guess and missing before quota are all the guesser's
+    decisions, so a crossed run attributes them to the guesser rather than to
+    the codemaster whose clue prompted them.
+
     Methods are collapsed here: eight stacked bars per facet is unreadable,
     and the method breakdown is available numerically in the round summary
     table.
     """
     present = [c for c in STOP_CLASSES if (rounds["stop_class"] == c).any()]
+    actor = _actor_column(rounds)
 
     def draw(ax, subset):
-        models = _model_order(rounds)
+        models = _level_order(rounds, actor)
         counts = []
         for xi, model in enumerate(models):
-            cell = subset[subset["model"] == model]
+            cell = subset[subset[actor] == model]
             total = len(cell) or 1
             bottom = 0.0
             for cls in present:
@@ -371,13 +396,13 @@ def fig_stop_behaviour(rounds: pd.DataFrame):
         ax.set_ylim(0, 1.14)
         annotate_n(ax, range(len(models)), counts, y=1.02)
 
+    role = "guesser" if actor == "guesser_model" else "codemaster"
     return facet_by_style(
         rounds,
         draw,
-        title="How rounds ended (stop taxonomy) by model",
+        title=f"How rounds ended (stop taxonomy) by {role}",
         ylabel="share of rounds",
-        subtitle="number above each bar = rounds behind that bar "
-        "(both prompt methods pooled, i.e. 10 games)",
+        subtitle="number above each bar = rounds behind that bar",
         legend_handles=_legend({c: _STOP_COLORS[c] for c in present}),
     )
 
@@ -465,19 +490,20 @@ def fig_dual_miss_lift(rounds: pd.DataFrame, boards: dict):
     board's own dual fraction. A lift of 1 means ambiguous words are hit at
     exactly their base rate — i.e. ambiguity is not the mechanism.
     """
-    lift = dual_miss_lift(rounds, boards, ["board_style", "model"])
+    actor = _actor_column(rounds)
+    lift = dual_miss_lift(rounds, boards, ["board_style", actor])
     lift = lift[lift["expected"] > 0]
     if lift.empty:
         return None
 
     styles = style_order(lift["board_style"].unique())
-    models = sorted(lift["model"].unique())
+    models = sorted(lift[actor].unique())
     colors = _colors_for(models)
 
     fig, ax = plt.subplots(figsize=(FACET_WIDTH * 1.9, FACET_HEIGHT))
     width = 0.8 / max(len(models), 1)
     for mi, model in enumerate(models):
-        rows = lift[lift["model"] == model].set_index("board_style").reindex(styles)
+        rows = lift[lift[actor] == model].set_index("board_style").reindex(styles)
         offsets = [i - 0.4 + width * (mi + 0.5) for i in range(len(styles))]
         ax.bar(offsets, rows["observed"], width=width * 0.9, color=colors[model],
                label=short_model(model), edgecolor="white", linewidth=0.4)
@@ -568,6 +594,174 @@ def fig_first_guess_lift(games: pd.DataFrame):
     return fig
 
 
+# --- 9. winning game length across the ladder ---------------------------
+
+
+def fig_win_length_ladder(games: pd.DataFrame):
+    """Rounds needed to win, across the dual_0 -> dual_100 ladder.
+
+    The companion to `fig_ambiguity_ladder`, on the same axes: win rate says
+    how often the pair finds all nine targets, this says how dearly. Losses
+    are excluded rather than faceted because they end the moment the assassin
+    is hit, so a lost game is short for the opposite reason a won game is —
+    mixing the two makes ambiguity look free (see `fig_game_length`).
+
+    n moves a lot from point to point here, since a cell contributes only its
+    wins and a model can win nothing at all on a hard style, so every point
+    carries its own n instead of the single figure-level note fig 3 can use.
+    """
+    completed = games[games["completed"]]
+    wins = completed[completed["is_win"] == 1.0]
+    if wins.empty:
+        return None
+
+    styles = style_order(completed["board_style"].dropna().unique())
+    methods = sorted(completed["method"].dropna().unique())
+    # Models come from the completed games, not the wins, so a model that
+    # never won still gets its colour slot and shows up as an explicit 0.
+    models = _model_order(completed)
+    colors = _colors_for(models)
+
+    stats = summarize(wins, ["method", "board_style", "model"], ["game_length"])
+    se = stats["game_length_se"].fillna(0)
+    # Zero-based like `fig_game_length`: rounds are a magnitude, and cropping
+    # the axis to the data would inflate gaps of a round or two into cliffs.
+    top = float((stats["game_length_mean"] + se).max()) * 1.12
+
+    fig, axes = plt.subplots(
+        1, len(methods) or 1,
+        figsize=(FACET_WIDTH * max(len(methods), 1) * 1.15, FACET_HEIGHT),
+        sharey=True, squeeze=False,
+    )
+    # Wider than fig 3's dodge: the per-point n labels underneath need the room.
+    dodge = 0.13
+    for ax, method in zip(axes[0], methods):
+        for mi, model in enumerate(models):
+            line = stats[(stats["method"] == method) & (stats["model"] == model)]
+            line = line.set_index("board_style").reindex(styles)
+            offset = (mi - (len(models) - 1) / 2) * dodge
+            xs = [x + offset for x in range(len(styles))]
+            ax.errorbar(
+                xs,
+                line["game_length_mean"],
+                yerr=line["game_length_se"],
+                marker="o", capsize=3, linewidth=1.6, markersize=5,
+                color=colors[model], label=short_model(model),
+            )
+            annotate_n(
+                ax,
+                xs,
+                line["game_length_n"].fillna(0).to_numpy(),
+                y=top * 0.015,
+                fontsize=6.5,
+            )
+        ax.set_xticks(range(len(styles)))
+        ax.set_xticklabels(styles, rotation=45, ha="right", fontsize=8)
+        ax.set_title(method, fontsize=10)
+        ax.set_ylim(0, top)
+        ax.set_xlim(-0.5, len(styles) - 0.5)
+        ax.grid(axis="y", alpha=0.25, linewidth=0.5)
+        ax.set_axisbelow(True)
+
+    axes[0][0].set_ylabel("rounds to win")
+    fig.suptitle(
+        "Ambiguity ladder: rounds per win vs board style (SE bars) — won games only",
+        fontsize=12, y=1.09,
+    )
+    fig.text(0.5, 1.02, "number under each point = won games behind it",
+             ha="center", fontsize=8.5, color="#555555")
+    fig.legend(
+        handles=_legend({short_model(m): colors[m] for m in models}),
+        loc="upper center", bbox_to_anchor=(0.5, -0.02),
+        ncol=min(len(models), 4), frameon=False, fontsize=9,
+    )
+    fig.tight_layout()
+    return fig
+
+
+# --- 10. the codemaster x guesser grid ----------------------------------
+
+
+_PAIR_METRICS = (
+    ("first_guess_lift", "first-guess lift", "viridis"),
+    ("is_win", "win rate", "magma"),
+)
+
+
+def fig_pair_matrix(games: pd.DataFrame):
+    """Every codemaster against every guesser, one cell per pair.
+
+    The only figure that shows an *interaction*, which is the whole reason for
+    crossing the guesser: reading down a column asks whether one guesser
+    flatters every codemaster equally, and reading across a row asks whether a
+    codemaster's skill survives a change of partner. The leading diagonal is
+    self-play.
+
+    Cells are noisy by construction — a 4x4 grid splits a run sixteen ways, so
+    each cell holds a sixteenth of the games and resolves only large gaps. The
+    row and column means in the margins are the numbers to read; an individual
+    cell running hot or cold is usually not evidence. Every cell prints its own
+    n so that is visible rather than implied.
+    """
+    completed = games[games["completed"]]
+    if completed.empty or not _varies(completed, "guesser_model"):
+        return None
+
+    metrics = [m for m in _PAIR_METRICS if m[0] in completed.columns]
+    if not metrics:
+        return None
+
+    codemasters = _level_order(completed, "model")
+    guessers = _level_order(completed, "guesser_model")
+
+    fig, axes = plt.subplots(
+        1,
+        len(metrics),
+        figsize=(FACET_WIDTH * 1.5 * len(metrics), FACET_HEIGHT * 1.25),
+        squeeze=False,
+    )
+    for ax, (metric, label, cmap) in zip(axes[0], metrics):
+        cell = completed.pivot_table(
+            index="model", columns="guesser_model", values=metric, aggfunc="mean"
+        ).reindex(index=codemasters, columns=guessers)
+        counts = completed.pivot_table(
+            index="model", columns="guesser_model", values=metric, aggfunc="count"
+        ).reindex(index=codemasters, columns=guessers)
+
+        image = ax.imshow(cell.to_numpy(), cmap=cmap, aspect="auto")
+        fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
+
+        for r in range(len(codemasters)):
+            for c in range(len(guessers)):
+                value = cell.to_numpy()[r, c]
+                if pd.isna(value):
+                    continue
+                n = counts.to_numpy()[r, c]
+                # Label colour flips with cell darkness so it stays readable.
+                norm = image.norm(value)
+                ax.text(
+                    c, r, f"{value:.2f}\nn={int(n)}",
+                    ha="center", va="center", fontsize=7.5,
+                    color="white" if norm < 0.55 else "black",
+                )
+
+        ax.set_xticks(range(len(guessers)))
+        ax.set_xticklabels([short_model(g) for g in guessers], rotation=30, ha="right",
+                           fontsize=8)
+        ax.set_yticks(range(len(codemasters)))
+        ax.set_yticklabels([short_model(m) for m in codemasters], fontsize=8)
+        ax.set_xlabel("guesser")
+        ax.set_ylabel("codemaster")
+        ax.set_title(f"mean {label} per pair", fontsize=11)
+
+    fig.suptitle(
+        "Codemaster x Guesser — does the ranking survive a change of partner?",
+        fontsize=12,
+    )
+    fig.tight_layout()
+    return fig
+
+
 FIGURES = {
     "01_outcome_composition": lambda data: fig_outcome_composition(data.games),
     "02_game_length": lambda data: fig_game_length(data.games),
@@ -579,6 +773,8 @@ FIGURES = {
         data.rounds, {k: v for board in data.boards.values() for k, v in board.items()}
     ),
     "08_first_guess_lift": lambda data: fig_first_guess_lift(data.games),
+    "09_win_length_ladder": lambda data: fig_win_length_ladder(data.games),
+    "10_pair_matrix": lambda data: fig_pair_matrix(data.games),
 }
 
 

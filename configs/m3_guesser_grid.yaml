@@ -1,0 +1,86 @@
+# M3 GUESSER GRID: every codemaster against every guesser.
+#
+# Every run through 2026-08-17 held the Guesser fixed — llama-3.3-70b early on,
+# then claude-haiku-4.5. That isolates Codemaster skill but cannot answer
+# whether the ranking is a property of the models or an artifact of the one
+# partner they were all measured against. On the 08-17 tournament the
+# codemasters ranked, on first-guess lift:
+#
+#   gemini 0.517 / llama 0.401 / gpt-4o-mini 0.348 / qwen 0.139
+#
+# ...every number measured against Haiku. This run crosses the axis: all four
+# models play both roles, 16 pairs, self-play on the diagonal.
+#
+# WHY ONE PROMPT METHOD
+#
+# `translate_pipeline` showed no reliable effect on any model in the 08-17 data
+# (the largest gap, llama's 0.472 vs 0.330 lift, is within ~2 SE). Retiring it
+# pays for the guesser axis and keeps this run the same size as the last one.
+# The axis still exists in the config schema; the 08-17 data stands.
+#
+# 4 codemasters x 4 guessers x 1 method x 4 styles x 5 boards x 1 trial
+#   = 320 games, ~8,500 OpenRouter calls.
+#
+# BUDGET (projected from the 08-17 run's own per-call measurements)
+#
+#   cost           ~$1.40   (vs ~$4.90 for 08-17: Haiku, at $1.00/$5.00 per M
+#                            tokens, no longer makes all 4,551 guesser calls)
+#   serial compute  ~17.0 h
+#   wall clock       ~4.3 h at max_workers: 4
+#
+# Cost is not the constraint here; wall clock is.
+#
+# POWER — read this before interpreting the results
+#
+# Pooled within-cell variance from the 08-17 report (lift 0.0444):
+#
+#   comparison                    arms  games/arm  mdd_lift  mdd_win_rate
+#   codemaster (main effect)         4         80     0.093         0.218
+#   guesser    (main effect)         4         80     0.093         0.218
+#   codemaster x guesser (cell)     16         20     0.187         0.436
+#
+# The two MAIN EFFECTS resolve as well as the 08-17 run did. The individual
+# CELLS of the 4x4 matrix do not: at 0.187 a single cell running hot or cold is
+# not evidence. This design answers "does the codemaster ranking survive
+# averaging over guessers?" well, and "does model X specifically struggle with
+# guesser Y?" only for large effects.
+#
+# WHY max_workers: 4
+#
+# Capped at the number of codemasters. Tasks are ordered into Latin-square
+# rounds — pairs grouped by diagonal offset — so the 4 games in flight use 4
+# distinct codemasters AND 4 distinct guessers, and each provider serves at
+# most 2 concurrent calls (one per role). That is strictly safer than 08-17,
+# where Haiku absorbed all 4 guesser calls.
+#
+# Check `duration_s` against the 08-17 per-call baselines when this finishes
+# (gemini 5.50 s/call, llama 9.08, gpt-4o-mini 5.52, qwen 10.46): inflated
+# durations with flat rejection counts mean the provider throttled, which
+# otherwise reads as the model being non-compliant.
+#
+# SANITY CHECK ON THE RESULT
+#
+# `ambition_mean` (clue `count`) is a pure codemaster property and should be
+# near-invariant across the four guesser columns. If it moves with the guesser,
+# the dispatch is mis-wired. 08-17 baselines: gemini 1.74 / llama 1.53 /
+# gpt-4o-mini 2.03 / qwen 2.32.
+models:
+  - google/gemini-2.5-flash
+  - meta-llama/llama-3.3-70b-instruct
+  - openai/gpt-4o-mini
+  - qwen/qwen3.5-9b
+guesser_models:
+  - google/gemini-2.5-flash
+  - meta-llama/llama-3.3-70b-instruct
+  - openai/gpt-4o-mini
+  - qwen/qwen3.5-9b
+codemaster_prompt_methods:
+  - strong_hebrew
+board_styles:
+  - dual_0
+  - dual_50
+  - dual_80
+  - dual_100
+n_boards: 5
+n_trials: 1
+max_workers: 4

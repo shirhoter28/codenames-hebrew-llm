@@ -195,25 +195,35 @@ class LLMGuesser:
 class ExperimentConfig:
     models: list[str]
     codemaster_prompt_methods: list[str]
-    guesser_model: str
+    # The Guesser axis. A run crosses every codemaster with every entry here, so
+    # a one-element list is the old fixed-guesser design and a four-element list
+    # is the M3 grid. `guesser_model:` (scalar) in YAML still works and lands
+    # here as a single-element list.
+    guesser_models: list[str]
     board_styles: list[str]
     n_boards: int
     n_trials: int
-    # Concurrent games. Defaults to 1 so a run is only ever parallel by
-    # explicit choice. Keep it <= len(models): the dispatcher interleaves by
-    # model so each in-flight game hits a different provider, and going wider
-    # doubles workers onto the same provider, which is where 429s return.
+    # Concurrent games. Defaults to 1 so a run is only ever parallel by explicit
+    # choice. Capped at len(models), which bounds concurrent *codemaster* calls
+    # per provider to one. The guesser side is bounded by ceil(max_workers /
+    # len(guesser_models)) instead: a single fixed guesser absorbs every worker
+    # (as Haiku did on 2026-08-17), while a full grid halves that to one call
+    # per provider per role. The cap deliberately stays on the codemaster axis
+    # so crossing the guesser can only improve spread, never forbid a config
+    # that already runs.
     max_workers: int = 1
 
 
 _REQUIRED_CONFIG_KEYS = (
     "models",
     "codemaster_prompt_methods",
-    "guesser_model",
     "board_styles",
     "n_boards",
     "n_trials",
 )
+
+_GUESSER_KEY = "guesser_model"
+_GUESSER_AXIS_KEY = "guesser_models"
 
 
 def load_config(path) -> ExperimentConfig:
@@ -223,6 +233,8 @@ def load_config(path) -> ExperimentConfig:
         raise ValueError(f"Config {path} must contain a YAML mapping, got {type(data).__name__}")
 
     missing = [key for key in _REQUIRED_CONFIG_KEYS if key not in data]
+    if _GUESSER_KEY not in data and _GUESSER_AXIS_KEY not in data:
+        missing.append(_GUESSER_KEY)
     if missing:
         raise ValueError(f"Config {path} is missing required key(s): {', '.join(missing)}")
 
@@ -251,11 +263,42 @@ def load_config(path) -> ExperimentConfig:
             f"valid options are {sorted(BOARD_STYLES)}"
         )
 
-    guesser_model = data["guesser_model"]
-    if not isinstance(guesser_model, str) or not guesser_model.strip():
+    if _GUESSER_KEY in data and _GUESSER_AXIS_KEY in data:
         raise ValueError(
-            f"Config {path}: guesser_model must be a model id or "
-            f"{SAME_AS_CODEMASTER!r}, got {guesser_model!r}"
+            f"Config {path}: name either {_GUESSER_KEY} (one fixed guesser) or "
+            f"{_GUESSER_AXIS_KEY} (a guesser axis), not both — they would "
+            f"silently disagree about how many guessers the run crosses."
+        )
+
+    if _GUESSER_AXIS_KEY in data:
+        guessers = data[_GUESSER_AXIS_KEY]
+        if not isinstance(guessers, list) or not guessers:
+            raise ValueError(
+                f"Config {path}: {_GUESSER_AXIS_KEY} must be a non-empty list, got {guessers!r}"
+            )
+    else:
+        guessers = [data[_GUESSER_KEY]]
+
+    for guesser in guessers:
+        if not isinstance(guesser, str) or not guesser.strip():
+            raise ValueError(
+                f"Config {path}: every guesser must be a model id or "
+                f"{SAME_AS_CODEMASTER!r}, got {guesser!r}"
+            )
+        # A near-miss on the sentinel used to pass validation and then be sent
+        # to OpenRouter as a literal model id, failing every call at runtime.
+        folded = guesser.strip().lower()
+        if folded != SAME_AS_CODEMASTER and SAME_AS_CODEMASTER in folded.replace("-", "_"):
+            raise ValueError(
+                f"Config {path}: {guesser!r} looks like a misspelling of the "
+                f"self-play sentinel {SAME_AS_CODEMASTER!r}"
+            )
+
+    duplicates = sorted({g for g in guessers if guessers.count(g) > 1})
+    if duplicates:
+        raise ValueError(
+            f"Config {path}: {_GUESSER_AXIS_KEY} repeats {', '.join(duplicates)}; "
+            f"a repeated guesser doubles that column's games and unbalances the grid"
         )
 
     for key in ("n_boards", "n_trials"):
@@ -279,7 +322,7 @@ def load_config(path) -> ExperimentConfig:
     return ExperimentConfig(
         models=data["models"],
         codemaster_prompt_methods=methods,
-        guesser_model=data["guesser_model"],
+        guesser_models=guessers,
         board_styles=styles,
         n_boards=data["n_boards"],
         n_trials=data["n_trials"],
@@ -530,7 +573,7 @@ _CSV_FIELDNAMES = [
 # Rows are written to raw.jsonl in completion order once games run
 # concurrently, so the rolled-up CSV is sorted to stay deterministic and
 # diffable across runs.
-_CSV_SORT_KEY = ("model", "method", "board_style", "board_seed", "trial")
+_CSV_SORT_KEY = ("model", "method", "guesser_model", "board_style", "board_seed", "trial")
 
 
 def _write_metrics_csv(rows: list[dict], path: Path) -> None:
@@ -578,31 +621,63 @@ def _write_run_manifest(
     # because `duration_s` is uninterpretable without knowing how many games
     # were competing for bandwidth alongside it.
     (run_dir / "run_meta.json").write_text(
-        json.dumps({"max_workers": max_workers}, indent=2), encoding="utf-8"
+        json.dumps(
+            {
+                "max_workers": max_workers,
+                "guesser_models": list(config.guesser_models),
+                "n_pairs": len(config.models) * len(config.guesser_models),
+                "dispatch": "latin_square",
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
     )
 
 
+def resolve_guesser(model: str, guesser: str) -> str:
+    """The guesser that actually plays, once the self-play sentinel is applied."""
+    return model if guesser == SAME_AS_CODEMASTER else guesser
+
+
 def _ordered_tasks(config: ExperimentConfig, boards: list[Board]) -> list[tuple]:
-    """One task per game, interleaved round-robin by model.
+    """One task per game, ordered so concurrent games spread across providers.
 
     Ordering is the rate-limit safety mechanism. Each model sits behind a
     different upstream provider, so dispatching model-by-model would point
     every concurrent worker at the SAME provider — the concentrated-burst
     pattern that killed a 180-game run with HTTP 429 (DECISIONS.md,
-    2026-08-10). Interleaving means the `max_workers` tasks in flight hit
-    `max_workers` different providers, so per-provider request rate is
-    unchanged from a sequential run even as total throughput rises.
+    2026-08-10). Now that a game occupies *two* providers, interleaving by
+    codemaster alone is not enough: four games with four distinct codemasters
+    could still share one guesser.
+
+    So pairs are grouped into Latin-square rounds by the diagonal offset
+    `k = (guesser_index - model_index) % n_guessers`. Every round holds one
+    pair per codemaster with the guessers all distinct, and the pairs within a
+    round are interleaved round-robin, so any `max_workers` consecutive tasks
+    inside a round use distinct models in both roles.
+
+    The perfect property does not extend across round handovers, and cannot:
+    demanding that every sliding window of N be N-distinct in both roles forces
+    both indices to cycle with period N, which reaches only N of the N^2 pairs.
+    Two concurrent calls per provider is the achievable bound, and it is only
+    reached in the (n_guessers - 1) brief handovers.
     """
-    per_model: list[list[tuple]] = []
-    for model in config.models:
-        tasks = [
-            (model, method, board, trial)
-            for method in config.codemaster_prompt_methods
-            for board in boards
-            for trial in range(config.n_trials)
-        ]
-        per_model.append(tasks)
-    return [t for group in zip_longest(*per_model) for t in group if t is not None]
+    n_guessers = len(config.guesser_models)
+    ordered: list[tuple] = []
+    for offset in range(n_guessers):
+        per_pair: list[list[tuple]] = []
+        for index, model in enumerate(config.models):
+            guesser = config.guesser_models[(index + offset) % n_guessers]
+            per_pair.append(
+                [
+                    (model, resolve_guesser(model, guesser), method, board, trial)
+                    for method in config.codemaster_prompt_methods
+                    for board in boards
+                    for trial in range(config.n_trials)
+                ]
+            )
+        ordered.extend(t for group in zip_longest(*per_pair) for t in group if t is not None)
+    return ordered
 
 
 def run_experiment(
@@ -634,40 +709,40 @@ def run_experiment(
     # Adapters are built up front, sequentially, rather than lazily inside
     # workers: construction order and count stay deterministic, and no two
     # threads race to build the same one.
+    # Keyed by the guesser that actually plays, so a model appearing in both
+    # roles — or in several pairs — is built once, not once per codemaster.
     guessers: dict[str, Guesser] = {}
-    guesser_models: dict[str, str] = {}
     codemasters: dict[tuple[str, str], Codemaster] = {}
     for model in config.models:
-        # Under self-play the guesser changes with the codemaster, so it is
-        # rebuilt per model rather than once for the whole run.
-        guesser_models[model] = (
-            model if config.guesser_model == SAME_AS_CODEMASTER else config.guesser_model
-        )
-        guessers[model] = make_guesser(guesser_models[model])
         for method in config.codemaster_prompt_methods:
             codemasters[(model, method)] = make_codemaster(model, method)
+    for model in config.models:
+        for guesser in config.guesser_models:
+            resolved = resolve_guesser(model, guesser)
+            if resolved not in guessers:
+                guessers[resolved] = make_guesser(resolved)
 
     tasks = _ordered_tasks(config, boards)
     total = len(tasks)
 
     def play(task: tuple) -> dict:
-        model, method, board, trial = task
+        model, guesser, method, board, trial = task
         try:
             return run_game(
                 codemasters[(model, method)],
-                guessers[model],
+                guessers[guesser],
                 board,
                 model,
                 method,
                 trial,
                 call_delay=trial_delay,
-                guesser_model=guesser_models[model],
+                guesser_model=guesser,
             )
         except Exception as exc:  # a poisoned task must not take down the pool
             return {
                 "model": model,
                 "method": method,
-                "guesser_model": guesser_models[model],
+                "guesser_model": guesser,
                 "board_seed": board.seed,
                 "board_style": board.style,
                 "trial": trial,
@@ -690,7 +765,8 @@ def run_experiment(
                 raw_file.flush()
                 rows.append(row)
                 print(
-                    f"[{len(rows):>5}/{total}] {row['model']} {row.get('board_style')} "
+                    f"[{len(rows):>5}/{total}] {row['model']} "
+                    f"vs {row.get('guesser_model')} {row.get('board_style')} "
                     f"{row['method']} -> {row.get('outcome') or row.get('status')}",
                     flush=True,
                 )

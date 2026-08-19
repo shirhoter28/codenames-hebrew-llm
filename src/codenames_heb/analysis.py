@@ -284,17 +284,27 @@ def comparison_power(
 
     rows = []
     for column in comparisons:
-        if column not in completed.columns:
+        # A tuple entry sizes an *interaction*: the arm is one combination of
+        # the named factors, not one level of a single factor. A 4x4 grid has
+        # 16 pair arms, so treating it as a 4-level main effect would claim 4x
+        # the games behind each cell.
+        columns = [column] if isinstance(column, str) else list(column)
+        if any(c not in completed.columns for c in columns):
             continue
-        n_levels = completed[column].nunique(dropna=False)
-        if n_levels < 2:
+        n_levels = len(completed.groupby(columns, dropna=False, observed=True))
+        if n_levels < 2 or any(completed[c].nunique(dropna=False) < 2 for c in columns):
             continue
+        label = (
+            f"{columns[0]} (collapsing the other factors)"
+            if len(columns) == 1
+            else f"{' x '.join(columns)} (per cell)"
+        )
         cells_per_arm = n_cells / n_levels
         for n in candidate_ns:
             per_arm = n * cells_per_arm
             rows.append(
                 {
-                    "comparison": f"{column} (collapsing the other factors)",
+                    "comparison": label,
                     "levels": n_levels,
                     "games_per_cell": n,
                     "games_per_arm": per_arm,

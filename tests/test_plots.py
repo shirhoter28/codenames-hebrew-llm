@@ -77,6 +77,27 @@ def test_box_labels_track_the_split_between_wins_and_losses(games):
     assert sorted(set(_annotations(fig))) == ["2", "4"]
 
 
+def test_win_length_ladder_counts_only_the_wins(games):
+    # Each model x method x style cell holds 3 games but only 2 wins. A point
+    # labelled 3 would mean the losses — which end early by hitting the
+    # assassin — were averaged into the cost of a win.
+    fig = plots.fig_win_length_ladder(games)
+
+    assert set(_annotations(fig)) == {"2"}
+
+
+def test_win_length_ladder_marks_a_style_a_model_never_won(games):
+    starved = games[~((games["model"] == "vendor/beta")
+                      & (games["board_style"] == "dual_100")
+                      & (games["is_win"] == 1.0))]
+
+    fig = plots.fig_win_length_ladder(starved)
+
+    # The model keeps its line and its colour slot; the empty style reads 0
+    # rather than silently vanishing.
+    assert "0" in _annotations(fig)
+
+
 def test_round_figures_are_labelled_in_rounds(rounds):
     # Bars pool both methods here: 2 methods x 3 games x 2 rounds = 12.
     fig = plots.fig_intended_overlap(rounds)
@@ -93,7 +114,8 @@ def test_facet_titles_name_the_style_without_a_misleading_total(games):
 @pytest.mark.parametrize(
     "name",
     ["01_outcome_composition", "02_game_length", "03_ambiguity_ladder",
-     "04_stop_behaviour", "05_intended_overlap", "06_ambition_vs_yield"],
+     "04_stop_behaviour", "05_intended_overlap", "06_ambition_vs_yield",
+     "09_win_length_ladder"],
 )
 def test_every_figure_builds(name, games, rounds):
     class Data:

@@ -20,6 +20,16 @@ def main(
     max_workers: int | None = None,
 ) -> Path:
     config = load_config(config_path)
+    # `load_config` caps the value in the file, but the override never went
+    # through that check — so `--max-workers 40` silently bypassed the very
+    # limit the flag's help text promises.
+    if max_workers is not None and max_workers > len(config.models):
+        raise SystemExit(
+            f"--max-workers {max_workers} exceeds the number of models "
+            f"({len(config.models)}). Concurrent games are spread across models "
+            f"so they hit different providers; going wider stacks requests on "
+            f"one provider, which is what triggers rate limiting."
+        )
     word_lists = load_word_lists()
     client = client or OpenRouterClient()
 

@@ -1,0 +1,34 @@
+# M3 SMOKE TEST: one game per pair, before committing 4.3 hours.
+#
+# Same axes as `m3_guesser_grid.yaml` but a single board and a single style, so
+# every one of the 16 codemaster/guesser pairs plays exactly once: 16 games,
+# ~5 minutes, ~$0.07.
+#
+# What to check in the results before launching the full run:
+#
+#   1. All 16 pairs appear in raw.jsonl, and `guesser_model` varies within a
+#      single codemaster (i.e. the grid is actually crossed, not just relabelled).
+#   2. `guesser_compliance_rate` PER GUESSER MODEL. The full run's budget
+#      extrapolates this from codemaster compliance — Haiku is the only guesser
+#      ever measured, at 1.000 — assuming 0.94/0.92/0.89/0.77 for
+#      gemini/llama/gpt-4o-mini/qwen. Qwen is the risk: if it lands near its
+#      codemaster figure of 0.540 instead, its games make ~40% more calls and
+#      the 4.3 h estimate needs revisiting.
+#   3. No `finish_reason: length` and no unexpected rejection reasons.
+models:
+  - google/gemini-2.5-flash
+  - meta-llama/llama-3.3-70b-instruct
+  - openai/gpt-4o-mini
+  - qwen/qwen3.5-9b
+guesser_models:
+  - google/gemini-2.5-flash
+  - meta-llama/llama-3.3-70b-instruct
+  - openai/gpt-4o-mini
+  - qwen/qwen3.5-9b
+codemaster_prompt_methods:
+  - strong_hebrew
+board_styles:
+  - dual_0
+n_boards: 1
+n_trials: 1
+max_workers: 4

@@ -29,7 +29,7 @@ def _config(**overrides) -> ExperimentConfig:
     defaults = dict(
         models=["model-a"],
         codemaster_prompt_methods=["strong_hebrew"],
-        guesser_model="guesser-model",
+        guesser_models=["guesser-model"],
         board_styles=["dual_50"],
         n_boards=2,
         n_trials=1,
@@ -133,7 +133,8 @@ def test_adapters_are_built_up_front_not_raced_by_workers(tmp_path):
 
     # One per cell, in config order — not once per game, and not concurrently.
     assert built_cm == [("model-a", "strong_hebrew"), ("model-b", "strong_hebrew")]
-    assert built_g == ["guesser-model", "guesser-model"]
+    # One per distinct guesser, so a fixed guesser is built once for the run.
+    assert built_g == ["guesser-model"]
 
 
 def test_one_poisoned_game_does_not_take_down_the_pool(tmp_path):

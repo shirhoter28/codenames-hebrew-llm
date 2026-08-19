@@ -451,7 +451,7 @@ def test_load_config_reads_yaml(tmp_path):
     assert config == ExperimentConfig(
         models=["model-a", "model-b"],
         codemaster_prompt_methods=["strong_hebrew", "translate_pipeline"],
-        guesser_model="guesser-model",
+        guesser_models=["guesser-model"],
         board_styles=["dual_50"],
         n_boards=2,
         n_trials=1,
@@ -472,7 +472,7 @@ def test_run_experiment_writes_expected_number_of_rows(tmp_path):
     config = ExperimentConfig(
         models=["model-a", "model-b"],
         codemaster_prompt_methods=["strong_hebrew"],
-        guesser_model="guesser-model",
+        guesser_models=["guesser-model"],
         board_styles=["dual_50"],
         n_boards=2,
         n_trials=2,
@@ -532,7 +532,7 @@ def test_run_experiment_reuses_same_boards_across_models(tmp_path):
     config = ExperimentConfig(
         models=["model-a", "model-b"],
         codemaster_prompt_methods=["strong_hebrew"],
-        guesser_model="guesser-model",
+        guesser_models=["guesser-model"],
         board_styles=["dual_50"],
         n_boards=1,
         n_trials=1,
@@ -771,7 +771,7 @@ def _tiny_config(**overrides) -> ExperimentConfig:
     defaults = dict(
         models=["model-a"],
         codemaster_prompt_methods=["strong_hebrew"],
-        guesser_model="guesser-model",
+        guesser_models=["guesser-model"],
         board_styles=["dual_50"],
         n_boards=2,
         n_trials=1,
@@ -892,7 +892,7 @@ def test_run_experiment_self_play_uses_each_codemaster_as_its_own_guesser(tmp_pa
     run_dir = run_experiment(
         config=_tiny_config(
             models=["model-a", "model-b"],
-            guesser_model=SAME_AS_CODEMASTER,
+            guesser_models=[SAME_AS_CODEMASTER],
             n_boards=1,
         ),
         word_lists=_word_lists(),
@@ -927,7 +927,7 @@ def test_run_experiment_fixed_guesser_is_shared_across_codemaster_models(tmp_pat
     run_dir = run_experiment(
         config=_tiny_config(
             models=["model-a", "model-b"],
-            guesser_model="fixed/guesser",
+            guesser_models=["fixed/guesser"],
             n_boards=1,
         ),
         word_lists=_word_lists(),
@@ -937,7 +937,9 @@ def test_run_experiment_fixed_guesser_is_shared_across_codemaster_models(tmp_pat
         trial_delay=0,
     )
 
-    assert built_guessers == ["fixed/guesser", "fixed/guesser"]
+    # Built once, not once per codemaster: adapters are keyed by the guesser
+    # that plays, so a model reused across pairs is constructed a single time.
+    assert built_guessers == ["fixed/guesser"]
     rows = [
         json.loads(line)
         for line in (run_dir / "raw.jsonl").read_text(encoding="utf-8").strip().splitlines()
@@ -951,4 +953,4 @@ def test_load_config_accepts_same_as_codemaster_sentinel(tmp_path):
         _VALID_CONFIG_TEXT.replace("guesser_model: guesser-model", f"guesser_model: {SAME_AS_CODEMASTER}"),
     )
 
-    assert load_config(path).guesser_model == SAME_AS_CODEMASTER
+    assert load_config(path).guesser_models == [SAME_AS_CODEMASTER]
