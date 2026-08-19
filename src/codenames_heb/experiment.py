@@ -639,6 +639,83 @@ def resolve_guesser(model: str, guesser: str) -> str:
     return model if guesser == SAME_AS_CODEMASTER else guesser
 
 
+def _game_key(row: dict) -> tuple:
+    """Identity of one game, matching the shape of a task tuple."""
+    return (
+        row.get("model"),
+        row.get("guesser_model"),
+        row.get("method"),
+        row.get("board_style"),
+        row.get("board_seed"),
+        row.get("trial"),
+    )
+
+
+def _task_key(task: tuple) -> tuple:
+    model, guesser, method, board, trial = task
+    return (model, guesser, method, board.style, board.seed, trial)
+
+
+def _read_raw_rows(run_dir: Path) -> list[dict]:
+    """Games already on disk. A trailing partial line is dropped, not fatal:
+    a hard kill mid-write leaves one, and that game simply gets replayed."""
+    path = run_dir / "raw.jsonl"
+    if not path.exists():
+        return []
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
+def _check_resume_matches(
+    run_dir: Path, config: ExperimentConfig, boards: list[Board], done: set
+) -> None:
+    """Refuse to resume a run whose design does not match the config given.
+
+    The games already on disk were played against a specific grid and a
+    specific set of boards. Continuing with a different one would append a
+    second experiment into the same file, and nothing downstream could tell
+    the two apart — every row looks equally valid.
+
+    The run's own `config.yaml` is the authority, not the recorded rows: a
+    config that merely *grows* the grid (say n_boards 2 -> 5) leaves every
+    existing row still playable, so comparing rows alone would wave it through.
+    """
+    recorded = run_dir / "config.yaml"
+    if recorded.exists():
+        original = load_config(recorded)
+        design = ("models", "guesser_models", "codemaster_prompt_methods",
+                  "board_styles", "n_boards", "n_trials")
+        differing = [
+            f"{field}: {getattr(original, field)!r} -> {getattr(config, field)!r}"
+            for field in design
+            if getattr(original, field) != getattr(config, field)
+        ]
+        if differing:
+            raise ValueError(
+                f"Cannot resume {run_dir}: the config given describes a different "
+                f"design than the run was started with ({'; '.join(differing)}). "
+                f"Resume it with its own config.yaml, or start a new run."
+            )
+
+    playable = {_task_key(t) for t in _ordered_tasks(config, boards)}
+    orphans = done - playable
+    if orphans:
+        raise ValueError(
+            f"Cannot resume {run_dir}: {len(orphans)} recorded game(s) are not in "
+            f"the grid this config describes (e.g. {sorted(orphans)[0]}). The run "
+            f"was played against a different design — resume it with its own "
+            f"config.yaml, or start a new run."
+        )
+
+
 def _ordered_tasks(config: ExperimentConfig, boards: list[Board]) -> list[tuple]:
     """One task per game, ordered so concurrent games spread across providers.
 
@@ -689,14 +766,21 @@ def run_experiment(
     config_path=None,
     trial_delay: float = 3.0,
     max_workers: int | None = None,
+    resume_from=None,
 ) -> Path:
     # Explicit argument wins; otherwise the config's value, defaulting to
     # sequential so nothing becomes concurrent by accident.
     if max_workers is None:
         max_workers = config.max_workers
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    run_dir = Path(results_dir) / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
+
+    if resume_from is None:
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        run_dir = Path(results_dir) / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        run_dir = Path(resume_from)
+        if not run_dir.is_dir():
+            raise ValueError(f"Cannot resume: {run_dir} is not a run directory")
 
     boards = [
         generate_board(word_lists.regular, word_lists.dual, seed=i, style=style)
@@ -704,7 +788,14 @@ def run_experiment(
         for i in range(config.n_boards)
     ]
 
-    _write_run_manifest(run_dir, boards, config, config_path, max_workers)
+    done: set = set()
+    existing: list[dict] = []
+    if resume_from is not None:
+        existing = _read_raw_rows(run_dir)
+        done = {_game_key(row) for row in existing}
+        _check_resume_matches(run_dir, config, boards, done)
+    else:
+        _write_run_manifest(run_dir, boards, config, config_path, max_workers)
 
     # Adapters are built up front, sequentially, rather than lazily inside
     # workers: construction order and count stay deterministic, and no two
@@ -722,8 +813,14 @@ def run_experiment(
             if resolved not in guessers:
                 guessers[resolved] = make_guesser(resolved)
 
-    tasks = _ordered_tasks(config, boards)
-    total = len(tasks)
+    tasks = [t for t in _ordered_tasks(config, boards) if _task_key(t) not in done]
+    # Progress counts the whole run, not just this leg, so a resumed run reads
+    # against the same denominator as the one that was interrupted.
+    already = len(existing)
+    total = already + len(tasks)
+    if already:
+        print(f"Resuming {run_dir}: {already} games already recorded, {len(tasks)} to play",
+              flush=True)
 
     def play(task: tuple) -> dict:
         model, guesser, method, board, trial = task
@@ -752,9 +849,12 @@ def run_experiment(
                 "rounds": [],
             }
 
-    rows: list[dict] = []
+    rows: list[dict] = list(existing)
     write_lock = threading.Lock()
-    with (run_dir / "raw.jsonl").open("w", encoding="utf-8") as raw_file:
+    # Append, never truncate: the completed games in this file are the reason
+    # resuming is possible at all.
+    mode = "a" if existing else "w"
+    with (run_dir / "raw.jsonl").open(mode, encoding="utf-8") as raw_file:
 
         def record(row: dict) -> None:
             # Flushed on every row: an unattended multi-hour run must not lose

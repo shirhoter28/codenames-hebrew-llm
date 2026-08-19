@@ -18,7 +18,14 @@ def main(
     results_dir: Path = DEFAULT_RESULTS_DIR,
     client: OpenRouterClient | None = None,
     max_workers: int | None = None,
+    resume_from: Path | None = None,
 ) -> Path:
+    # A resumed run must continue under the design it started with, so its own
+    # recorded config wins over whatever path was passed on the command line.
+    if resume_from is not None:
+        recorded = Path(resume_from) / "config.yaml"
+        if recorded.exists():
+            config_path = recorded
     config = load_config(config_path)
     # `load_config` caps the value in the file, but the override never went
     # through that check — so `--max-workers 40` silently bypassed the very
@@ -44,6 +51,7 @@ def main(
         config_path=config_path,
         # None falls through to the config's own value.
         max_workers=max_workers,
+        resume_from=resume_from,
     )
     print(f"Results written to {run_dir}")
     return run_dir
@@ -65,6 +73,14 @@ def _parse_args(argv=None):
         help="where to write results/<run_id> (default: results/)",
     )
     parser.add_argument(
+        "--resume", type=Path, default=None, metavar="RUN_DIR",
+        help=(
+            "continue an interrupted run: replays only the games missing from "
+            "its raw.jsonl and appends to it. Uses that run's own config.yaml, "
+            "so the design cannot drift between legs."
+        ),
+    )
+    parser.add_argument(
         "--max-workers", type=int, default=None,
         help=(
             "games to run concurrently, overriding the config. Capped at the "
@@ -81,4 +97,5 @@ if __name__ == "__main__":
         config_path=args.config,
         results_dir=args.results_dir,
         max_workers=args.max_workers,
+        resume_from=args.resume,
     )
