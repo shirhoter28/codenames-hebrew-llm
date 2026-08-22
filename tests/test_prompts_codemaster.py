@@ -220,3 +220,36 @@ def test_translate_pipeline_also_carries_the_opponent_progress_line():
     )
 
     assert "OPPONENT_PROGRESS: 1 of 2" in system
+
+
+# --- reasoning is no longer requested ------------------------------------
+#
+# It was 74% of the codemaster's reply bytes on the 08-17 run and, being the
+# last key in the JSON, could only ever be post-hoc justification — the clue
+# is already committed by the time it is written. Dropped for run cost; still
+# accepted if a model volunteers one.
+
+
+def test_prompts_no_longer_ask_for_reasoning():
+    strong, _ = build_strong_hebrew_prompt(_board())
+    translate, _ = build_translate_pipeline_prompt(_board())
+
+    assert "reasoning" not in strong
+    assert "reasoning" not in translate
+
+
+def test_a_response_without_reasoning_is_accepted():
+    result = parse_codemaster_response(
+        {"clue": "אור", "count": 1, "intended_targets": ["ירח"]}
+    )
+
+    assert result.clue == "אור"
+    assert result.reasoning == ""
+
+
+def test_volunteered_reasoning_is_still_kept():
+    result = parse_codemaster_response(
+        {"clue": "אור", "count": 1, "intended_targets": ["ירח"], "reasoning": "light"}
+    )
+
+    assert result.reasoning == "light"

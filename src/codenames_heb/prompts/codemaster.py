@@ -9,7 +9,9 @@ class CodemasterResponse:
     clue: str
     count: int
     intended_targets: list[str]
-    reasoning: str
+    # No longer requested in the prompt; kept so a volunteered one is not
+    # thrown away, and so older runs stay loadable.
+    reasoning: str = ""
     translation_map: dict[str, str] | None = None
     en_clue: str | None = None
     en_targets: list[str] | None = None
@@ -76,7 +78,7 @@ Strict rules:
    no more, no fewer.
 {required_count_line}
 Respond with JSON only: {{"clue": "...", "count": <int>,
-"intended_targets": ["..."], "reasoning": "one sentence"}}"""
+"intended_targets": ["..."]}}"""
 
 
 def build_strong_hebrew_prompt(
@@ -107,7 +109,7 @@ from YOUR_WORDS above. `count` must equal exactly the number of words in
 `intended_targets` — no more, no fewer.
 {required_count_line}
 Respond with JSON only: {{"clue": "...", "count": <int>,
-"intended_targets": ["..."], "reasoning": "one sentence",
+"intended_targets": ["..."],
 "translation_map": {{"he_word": "en_word", ...}},
 "en_clue": "...", "en_targets": ["..."]}}"""
 
@@ -130,7 +132,7 @@ PROMPT_METHODS = {
 
 
 def parse_codemaster_response(data: dict) -> CodemasterResponse:
-    required = {"clue", "count", "intended_targets", "reasoning"}
+    required = {"clue", "count", "intended_targets"}
     missing = required - data.keys()
     if missing:
         raise ValueError(f"Codemaster response missing keys: {missing}")

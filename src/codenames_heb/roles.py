@@ -13,7 +13,7 @@ class Codemaster(Protocol):
         revealed: dict[str, str] | None = None,
         stats: Counter | None = None,
     ) -> dict:
-        """Return {"clue": str, "count": int, "intended_targets": list[str], "reasoning": str, ...}.
+        """Return {"clue": str, "count": int, "intended_targets": list[str], ...}.
 
         `stats`, when given, is incremented with per-attempt compliance counts.
         """
