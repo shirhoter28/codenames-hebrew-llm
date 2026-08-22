@@ -524,3 +524,115 @@ def test_scaling_projection_narrows_the_interval_as_games_per_cell_grow():
     assert out.loc[20, "api_calls_total"] > out.loc[5, "api_calls_total"]
     # 2 cells (a, b) x 20 games x 20 calls
     assert out.loc[20, "api_calls_total"] == pytest.approx(800.0)
+
+
+# --- re-scoring pre-2026-08-22 runs --------------------------------------
+#
+# Runs played before the opposing team could win carry no `loss_reason`. The
+# reveal sequence is unaffected by a terminal rule the players were never
+# told about, so those games can be re-scored from their own logs — but the
+# rounds after the opposition ran out of words did not happen under the new
+# rule and must be dropped.
+
+
+def _opponent_round(n_opponents: int, **overrides):
+    rnd = _round(
+        guess_sequence=[{"word": f"o{i}", "role": "opponent"} for i in range(n_opponents)],
+        turn_outcome="hit_opponent",
+        guesses_before_miss=0,
+    )
+    rnd.update(overrides)
+    return rnd
+
+
+def _board_json(n_opponents=8, seed=0, style="dual_50"):
+    roles = {f"o{i}": "opponent" for i in range(n_opponents)}
+    roles.update({f"t{i}": "target" for i in range(9)})
+    return [{"seed": seed, "style": style, "words": list(roles), "roles": roles,
+             "is_dual": {w: False for w in roles}}]
+
+
+def test_exhausting_the_opponent_words_rescores_an_old_win_as_a_loss(tmp_path):
+    rounds = [
+        _opponent_round(8, round=1),
+        _round(round=2, guess_sequence=[{"word": "t1", "role": "target"}]),
+    ]
+    row = _game(outcome="win", game_length=2, targets_found=9, rounds=rounds)
+    run_dir = _write_run(tmp_path, [row], boards=_board_json())
+
+    games = load_run(run_dir).games
+
+    assert games.loc[0, "outcome"] == "loss"
+    assert games.loc[0, "loss_reason"] == "opponent_words"
+    assert bool(games.loc[0, "rescored"]) is True
+
+
+def test_rescoring_drops_the_rounds_that_would_not_have_been_played(tmp_path):
+    rounds = [
+        _opponent_round(8, round=1),
+        _round(round=2, guess_sequence=[{"word": "t1", "role": "target"}]),
+        _round(round=3, guess_sequence=[{"word": "t2", "role": "target"}]),
+    ]
+    row = _game(outcome="win", game_length=3, targets_found=9, rounds=rounds)
+    run_dir = _write_run(tmp_path, [row], boards=_board_json())
+
+    data = load_run(run_dir)
+
+    assert data.games.loc[0, "game_length"] == 1
+    assert data.games.loc[0, "targets_found"] == 0
+    assert len(data.rounds) == 1
+
+
+def test_a_game_that_never_exhausts_the_opponent_words_is_left_alone(tmp_path):
+    rounds = [_opponent_round(3, round=1)]
+    row = _game(outcome="win", game_length=1, targets_found=9, rounds=rounds)
+    run_dir = _write_run(tmp_path, [row], boards=_board_json())
+
+    games = load_run(run_dir).games
+
+    assert games.loc[0, "outcome"] == "win"
+    assert games.loc[0, "loss_reason"] is None
+    assert bool(games.loc[0, "rescored"]) is False
+    assert games.loc[0, "opponent_words_revealed"] == 3
+
+
+def test_a_run_that_already_records_a_loss_reason_is_not_re_derived(tmp_path):
+    # A post-2026-08-22 run is authoritative: the runner ended the game itself,
+    # so re-deriving could only disagree with what was actually played.
+    rounds = [_opponent_round(8, round=1)]
+    row = _game(
+        outcome="loss", loss_reason="assassin", game_length=1, targets_found=0,
+        assassin_hit=True, opponent_words_revealed=8, rounds=rounds,
+    )
+    run_dir = _write_run(tmp_path, [row], boards=_board_json())
+
+    games = load_run(run_dir).games
+
+    assert games.loc[0, "loss_reason"] == "assassin"
+    assert bool(games.loc[0, "rescored"]) is False
+
+
+def test_rescoring_falls_back_to_the_standard_count_without_board_data(tmp_path):
+    # Pre-style runs wrote boards.json without roles; 8 is the only opponent
+    # count `generate_board` has ever produced.
+    rounds = [_opponent_round(8, round=1)]
+    row = _game(outcome="win", game_length=1, targets_found=9, rounds=rounds)
+    run_dir = _write_run(tmp_path, [row], boards=[])
+
+    games = load_run(run_dir).games
+
+    assert games.loc[0, "outcome"] == "loss"
+    assert games.loc[0, "loss_reason"] == "opponent_words"
+
+
+def test_an_old_loss_that_kept_its_opponent_words_is_labelled_an_assassin_loss(tmp_path):
+    # Pre-2026-08-22 the assassin was the only way to lose, so the outcome
+    # alone identifies the reason.
+    row = _game(outcome="loss", game_length=1, targets_found=2, assassin_hit=True,
+                rounds=[_round(turn_outcome="hit_assassin")])
+    run_dir = _write_run(tmp_path, [row], boards=_board_json())
+
+    games = load_run(run_dir).games
+
+    assert games.loc[0, "loss_reason"] == "assassin"
+    assert bool(games.loc[0, "rescored"]) is False

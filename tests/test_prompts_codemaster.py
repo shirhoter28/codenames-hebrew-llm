@@ -166,3 +166,57 @@ def test_parse_codemaster_response_strips_whitespace_from_intended_targets():
     )
 
     assert response.intended_targets == ["ירח", "שמש"]
+
+
+# --- the opposing team's win condition -----------------------------------
+
+
+def _two_opponent_board() -> Board:
+    return Board(
+        seed=2,
+        words=["א", "ב", "ג", "ד", "ה"],
+        roles={
+            "א": "target",
+            "ב": "opponent",
+            "ג": "opponent",
+            "ד": "civilian",
+            "ה": "assassin",
+        },
+    )
+
+
+def test_rules_state_that_revealing_every_opponent_word_loses():
+    system, _ = build_strong_hebrew_prompt(_board())
+
+    assert "OPPONENT" in system
+    assert "opposing team" in system
+
+
+def test_opponent_progress_counts_against_the_board_total():
+    system, _ = build_strong_hebrew_prompt(
+        _two_opponent_board(), revealed={"ב": "opponent"}
+    )
+
+    assert "OPPONENT_PROGRESS: 1 of 2" in system
+
+
+def test_opponent_progress_starts_at_zero_before_anything_is_revealed():
+    system, _ = build_strong_hebrew_prompt(_two_opponent_board())
+
+    assert "OPPONENT_PROGRESS: 0 of 2" in system
+
+
+def test_opponent_progress_ignores_revealed_words_of_other_roles():
+    system, _ = build_strong_hebrew_prompt(
+        _two_opponent_board(), revealed={"א": "target", "ד": "civilian"}
+    )
+
+    assert "OPPONENT_PROGRESS: 0 of 2" in system
+
+
+def test_translate_pipeline_also_carries_the_opponent_progress_line():
+    system, _ = build_translate_pipeline_prompt(
+        _two_opponent_board(), revealed={"ב": "opponent"}
+    )
+
+    assert "OPPONENT_PROGRESS: 1 of 2" in system

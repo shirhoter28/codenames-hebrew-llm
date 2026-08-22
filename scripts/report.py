@@ -212,10 +212,18 @@ def build_report(data, figure_paths: dict, run_label: str) -> str:
         "ended because a model could not produce a legal clue are reported separately "
         "as a completion rate; scoring them as losses would confuse a formatting "
         "failure with a bad clue.",
-        "- Games end only by finding all 9 targets or by hitting the assassin, so "
-        "`%loss` is close to `1 - %win`, and **game length is confounded with "
-        "outcome** — a short game is an efficient win or an early death. Length is "
-        "therefore also reported separately for wins and for losses.",
+        "- Games end by finding all 9 targets (win), by hitting the assassin, or by "
+        "revealing all 8 opponent words \u2014 the opposing team then has all of its "
+        "own and wins. `assassin_share_of_losses` splits the two loss kinds; its "
+        "denominator is the losses in that group, not the games.",
+        "- `%loss` is close to `1 - %win`, and **game length is confounded with "
+        "outcome** \u2014 a short game is an efficient win or an early death. Length is "
+        "therefore also reported separately for wins and for losses, and "
+        "`targets_per_round` carries the same confound.",
+        "- Games from runs played before 2026-08-22 are re-scored against the "
+        "opponent-words rule from their own logs, and the rounds that could not have "
+        "been played under it are dropped. Those games are flagged `rescored`; the "
+        "players were never told the rule, so their play is unaffected by it.",
         "- SE is `sd / sqrt(n)` at the natural unit (games for game metrics, rounds "
         "for round metrics). Proportions also carry a Wilson 95% interval, because "
         "at small n a Wald SE of 0 at p=0 or p=1 reads as false certainty.",
@@ -274,6 +282,22 @@ def build_report(data, figure_paths: dict, run_label: str) -> str:
             )
         )
 
+    lines.append(
+        _section(
+            "Ambition vs recovery — by clue count",
+            # `ambition` *is* the group key here, so its column is a constant.
+            _fmt(round_summary(rounds, ["count"]), drop=["ambition_mean", "ambition_se"]),
+            "Grouped by the codemaster's own `count`, this is the answer to "
+            "\"should the codemaster be asking for more words?\" Read "
+            "`intended_recall` (share of the aimed-at words the guesser actually "
+            "found) against `yield_mean` (targets that clue bought). If recall "
+            "falls faster than yield rises, larger clues buy misses rather than "
+            "speed and the small counts are correct play, not timidity. "
+            "**Observational**: `count` is chosen by the model, not assigned, so "
+            "harder boards and weaker links select into the higher counts. Only a "
+            "forced-count run (M4) separates the two.",
+        )
+    )
     lines.append(
         _section(
             "Stop behaviour — counts and shares",

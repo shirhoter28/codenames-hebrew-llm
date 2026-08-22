@@ -37,6 +37,7 @@ Z_95 = 1.959963984540054
 Z_POWER_80 = 0.8416212335729143
 
 TARGETS_PER_BOARD = ROLE_COUNTS["target"]
+OPPONENTS_PER_BOARD = ROLE_COUNTS["opponent"]
 
 # Only these end with a played-out board. `codemaster_failure`, `stalled`,
 # `max_rounds_reached` and harness errors are reported as a separate
@@ -457,6 +458,31 @@ def _load_config(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
+def _role_total(board: dict, role: str, default: int) -> int:
+    """How many words of `role` the board holds, from its own key when the run
+    recorded one. Pre-style runs wrote boards.json without roles."""
+    roles = board.get("roles") or {}
+    return sum(1 for value in roles.values() if value == role) or default
+
+
+def _opponent_exhaustion(raw_rounds: list, opponent_total: int) -> int | None:
+    """Index of the round in which the last OPPONENT word falls, if it does.
+
+    Runs played before 2026-08-22 kept going after the opposing team had all
+    its words. Re-scoring them from their own logs is sound because the rule
+    was never in the prompt, so nothing the players did was influenced by it —
+    but the rounds after that point did not happen under the new rule.
+    """
+    seen = 0
+    for index, raw in enumerate(raw_rounds):
+        for guess in raw.get("guess_sequence") or []:
+            if guess["role"] == "opponent":
+                seen += 1
+                if seen >= opponent_total:
+                    return index
+    return None
+
+
 def _build_game(row: dict, run_id: str, boards: dict, config: dict):
     style = row.get("board_style") or UNSPECIFIED_STYLE
     seed = row.get("board_seed")
@@ -474,24 +500,81 @@ def _build_game(row: dict, run_id: str, boards: dict, config: dict):
         "trial": row.get("trial"),
     }
 
-    rounds = _build_rounds(row.get("rounds") or [], key, is_dual)
+    raw_rounds = row.get("rounds") or []
     outcome = row.get("outcome")
+    loss_reason = row.get("loss_reason")
+    game_length = row.get("game_length")
+    targets_found = row.get("targets_found")
+    target_recovery_rate = row.get("target_recovery_rate")
+    assassin_hit = row.get("assassin_hit")
+    opponent_total = _role_total(board, "opponent", OPPONENTS_PER_BOARD)
+
+    # A run that records `loss_reason` was played under the current rules and
+    # ended itself; only older runs need the terminal state re-derived.
+    rescored = False
+    if "loss_reason" not in row:
+        cutoff = _opponent_exhaustion(raw_rounds, opponent_total)
+        if cutoff is not None:
+            raw_rounds = raw_rounds[: cutoff + 1]
+            targets_found = sum(
+                1
+                for raw in raw_rounds
+                for guess in raw.get("guess_sequence") or []
+                if guess["role"] == "target"
+            )
+            target_total = _role_total(board, "target", TARGETS_PER_BOARD)
+            outcome, loss_reason, assassin_hit = "loss", "opponent_words", False
+            game_length = len(raw_rounds)
+            target_recovery_rate = targets_found / target_total if target_total else None
+            rescored = True
+        elif outcome == "loss":
+            # Before the opposing team could win, the assassin was the only way
+            # to lose, so an old `loss` needs no evidence beyond its own outcome.
+            loss_reason = "assassin"
+
+    rounds = _build_rounds(raw_rounds, key, is_dual)
     completed = outcome in COMPLETED_OUTCOMES
 
     game = {
         **key,
         "status": row.get("status"),
         "outcome": outcome,
+        # Which of the two ways a loss happened. None on any other outcome, and
+        # on pre-2026-08-22 runs where no opponent-words loss was re-derived.
+        "loss_reason": loss_reason,
+        # True when this row's terminal state came from re-scoring an older run
+        # rather than from the runner. Such games have had their unplayable
+        # rounds dropped, so they are not identical to what raw.jsonl records.
+        "rescored": rescored,
         "completed": completed,
         # NaN rather than 0 on a failed game: an unplayed game is missing data,
         # not a loss, and summarize() skips nulls.
         "is_win": float(outcome == "win") if completed else None,
         "is_loss": float(outcome == "loss") if completed else None,
-        "game_length": row.get("game_length"),
+        # Which kind of loss, as a proportion over losses only: NaN on a win so
+        # `summarize` scores it against the losses in the group, not the games.
+        "is_assassin_loss": float(loss_reason == "assassin")
+        if completed and outcome == "loss"
+        else None,
+        # Speed. Games end only by winning or losing, so this is confounded
+        # with outcome exactly as `game_length` is — read it beside the win
+        # rate, never on its own.
+        "targets_per_round": (targets_found / game_length)
+        if targets_found is not None and game_length
+        else None,
+        "game_length": game_length,
         "n_rounds": len(rounds),
-        "targets_found": row.get("targets_found"),
-        "target_recovery_rate": row.get("target_recovery_rate"),
-        "assassin_hit": row.get("assassin_hit"),
+        "targets_found": targets_found,
+        "target_recovery_rate": target_recovery_rate,
+        "assassin_hit": assassin_hit,
+        "opponent_words_revealed": row.get("opponent_words_revealed")
+        if "opponent_words_revealed" in row
+        else sum(
+            1
+            for raw in raw_rounds
+            for guess in raw.get("guess_sequence") or []
+            if guess["role"] == "opponent"
+        ),
         "terminal_error": row.get("terminal_error") or row.get("error"),
         # Written only by the parallel runner; absent on earlier runs.
         "started_at": row.get("started_at"),
@@ -654,6 +737,11 @@ def _game_level_round_means(rounds: list) -> dict:
 
 GAME_METRICS = [
     "game_length", "is_win", "is_loss", "targets_found", "target_recovery_rate",
+    # Targets per round: how fast the pair converts clues into words.
+    "targets_per_round",
+    # Share of *losses* that were the assassin rather than the opposing team
+    # running out of words. NaN on wins, so its denominator is the losses.
+    "is_assassin_loss",
     # Per-game mean of the round-level lift; see `_first_guess_lift`.
     "first_guess_lift",
 ]
@@ -697,6 +785,7 @@ def game_summary(games: pd.DataFrame, group_cols: Sequence[str]) -> pd.DataFrame
             "is_loss_hi": "loss_hi",
             "game_length_mean": "length_mean",
             "game_length_se": "length_se",
+            "is_assassin_loss_mean": "assassin_share_of_losses",
             "targets_found_mean": "targets_found_mean",
             "targets_found_se": "targets_found_se",
         }
@@ -731,7 +820,9 @@ def game_summary(games: pd.DataFrame, group_cols: Sequence[str]) -> pd.DataFrame
         "length_mean", "length_se",
         "length_win_mean", "length_win_se", "n_win",
         "length_loss_mean", "length_loss_se", "n_loss",
+        "assassin_share_of_losses",
         "targets_found_mean", "targets_found_se",
+        "targets_per_round_mean", "targets_per_round_se",
         "first_guess_lift_mean", "first_guess_lift_se",
     ]
     return out[[c for c in keep if c in out.columns]]

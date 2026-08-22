@@ -95,3 +95,41 @@ def test_parse_single_guess_response_raises_on_unknown_action():
 def test_parse_single_guess_response_raises_when_guess_missing_word():
     with pytest.raises(ValueError):
         parse_single_guess_response({"action": "guess"})
+
+
+# --- the opposing team's win condition -----------------------------------
+#
+# The guesser is never shown the key, so it cannot count the board's opponent
+# words the way the codemaster can. It is told how many have been revealed and
+# left to read the total off GAME_RULES, rather than shown a number that would
+# be wrong on a non-standard board.
+
+
+def test_rules_state_that_revealing_every_opponent_word_loses():
+    system, _ = build_single_guess_prompt(
+        ["א"], clue="אור", count=1, correct_so_far=[], can_stop=False
+    )
+
+    assert "OPPONENT" in system
+    assert "opposing team" in system
+
+
+def test_guesser_is_told_how_many_opponent_words_have_been_revealed():
+    system, _ = build_single_guess_prompt(
+        ["א"],
+        clue="אור",
+        count=1,
+        correct_so_far=[],
+        can_stop=False,
+        revealed={"ב": "opponent", "ג": "opponent", "ד": "civilian"},
+    )
+
+    assert "OPPONENT_PROGRESS: 2 OPPONENT" in system
+
+
+def test_opponent_progress_is_omitted_before_any_word_is_revealed():
+    system, _ = build_single_guess_prompt(
+        ["א"], clue="אור", count=1, correct_so_far=[], can_stop=False
+    )
+
+    assert "OPPONENT_PROGRESS" not in system

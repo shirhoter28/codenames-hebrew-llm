@@ -25,15 +25,21 @@ def _word_lists() -> WordLists:
 
 
 def _board() -> Board:
-    """3 targets, 1 opponent, 1 civilian, 1 assassin — small, fully controllable."""
+    """3 targets, 2 opponents, 1 civilian, 1 assassin — small, fully controllable.
+
+    Two opponents rather than one so that revealing a single opponent word is
+    an ordinary miss; with one, every such miss would also exhaust the
+    opposing team's words and end the game.
+    """
     return Board(
         seed=1,
-        words=["t1", "t2", "t3", "o1", "c1", "a1"],
+        words=["t1", "t2", "t3", "o1", "o2", "c1", "a1"],
         roles={
             "t1": "target",
             "t2": "target",
             "t3": "target",
             "o1": "opponent",
+            "o2": "opponent",
             "c1": "civilian",
             "a1": "assassin",
         },
@@ -43,8 +49,15 @@ def _board() -> Board:
 def _two_target_board() -> Board:
     return Board(
         seed=2,
-        words=["t1", "t2", "o1", "c1", "a1"],
-        roles={"t1": "target", "t2": "target", "o1": "opponent", "c1": "civilian", "a1": "assassin"},
+        words=["t1", "t2", "o1", "o2", "c1", "a1"],
+        roles={
+            "t1": "target",
+            "t2": "target",
+            "o1": "opponent",
+            "o2": "opponent",
+            "c1": "civilian",
+            "a1": "assassin",
+        },
     )
 
 
@@ -506,10 +519,12 @@ def test_run_experiment_writes_expected_number_of_rows(tmp_path):
             "status",
             "stage",
             "outcome",
+            "loss_reason",
             "game_length",
             "targets_found",
             "target_recovery_rate",
             "assassin_hit",
+            "opponent_words_revealed",
             "codemaster_attempts",
             "codemaster_rejected",
             "codemaster_compliance_rate",
@@ -954,3 +969,72 @@ def test_load_config_accepts_same_as_codemaster_sentinel(tmp_path):
     )
 
     assert load_config(path).guesser_models == [SAME_AS_CODEMASTER]
+
+
+# --- the opposing team's win condition -----------------------------------
+#
+# Revealing every OPPONENT word means the opposing team has found all of
+# theirs. Before 2026-08-22 the game ran on regardless, so a game could be
+# scored a win after handing the opposition every word it needed.
+
+
+def _clue(n: int = 0) -> dict:
+    return {"clue": "x", "count": n, "intended_targets": [], "reasoning": "r"}
+
+
+def test_run_game_loses_when_every_opponent_word_is_revealed():
+    codemaster = StubCodemaster(responses=[_clue(), _clue()])
+    guesser = StubGuesser(guesses=["o1", "o2"])
+
+    row = run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
+
+    assert row["outcome"] == "loss"
+    assert row["loss_reason"] == "opponent_words"
+    assert row["game_length"] == 2
+    assert row["opponent_words_revealed"] == 2
+
+
+def test_an_opponent_words_loss_is_not_recorded_as_an_assassin_hit():
+    codemaster = StubCodemaster(responses=[_clue(), _clue()])
+    guesser = StubGuesser(guesses=["o1", "o2"])
+
+    row = run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
+
+    assert row["assassin_hit"] is False
+    assert row["rounds"][-1]["turn_outcome"] == "hit_opponent"
+
+
+def test_one_opponent_word_short_of_the_total_keeps_the_game_alive():
+    codemaster = StubCodemaster(responses=[_clue(), _clue(1)])
+    guesser = StubGuesser(guesses=["o1", "t1", None])
+
+    row = run_game(
+        codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0, max_rounds=2
+    )
+
+    assert row["outcome"] == "max_rounds_reached"
+    assert row["opponent_words_revealed"] == 1
+
+
+def test_the_assassin_still_ends_the_game_as_an_assassin_loss():
+    codemaster = StubCodemaster(responses=[_clue(), _clue()])
+    guesser = StubGuesser(guesses=["o1", "a1"])
+
+    row = run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
+
+    assert row["outcome"] == "loss"
+    assert row["loss_reason"] == "assassin"
+    assert row["assassin_hit"] is True
+
+
+def test_a_win_carries_no_loss_reason():
+    codemaster = StubCodemaster(responses=[{"clue": "x", "count": 3,
+                                            "intended_targets": ["t1", "t2", "t3"],
+                                            "reasoning": "r"}])
+    guesser = StubGuesser(guesses=["t1", "t2", "t3"])
+
+    row = run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
+
+    assert row["outcome"] == "win"
+    assert row["loss_reason"] is None
+    assert row["opponent_words_revealed"] == 0

@@ -44,10 +44,22 @@ def _format_budget_line(count: int, correct_so_far: list[str]) -> str:
 
 
 def _format_revealed_section(revealed: dict[str, str] | None) -> str:
+    """What has been turned over, and how close the opposing team is to winning.
+
+    The guesser never sees the key, so it cannot be told how many OPPONENT
+    words the board holds — only how many have surfaced. The total is in
+    GAME_RULES; printing one here would be a guess that a non-standard board
+    would make wrong.
+    """
     if not revealed:
         return ""
     revealed_line = ", ".join(f"{word} ({ROLE_TAGS[role]})" for word, role in revealed.items())
-    return f"REVEALED_SO_FAR: {revealed_line}\n"
+    opponent_gone = sum(1 for role in revealed.values() if role == "opponent")
+    return (
+        f"REVEALED_SO_FAR: {revealed_line}\n"
+        f"OPPONENT_PROGRESS: {opponent_gone} OPPONENT words revealed so far — the "
+        f"opposing team wins the moment all of theirs are.\n"
+    )
 
 
 def build_single_guess_prompt(

@@ -21,11 +21,19 @@ def _format_board_section(board: Board, revealed: dict[str, str] | None = None) 
     def unrevealed(role: str) -> list[str]:
         return [w for w in board.words_with_role(role) if w not in revealed]
 
+    # The opposing team's progress toward its own win. The codemaster can see
+    # the key, so this is counted against the board's real opponent total
+    # rather than the standard distribution.
+    opponent_total = len(board.words_with_role("opponent"))
+    opponent_gone = sum(1 for role in revealed.values() if role == "opponent")
+
     section = (
         f"YOUR_WORDS: {', '.join(unrevealed('target'))}\n"
         f"OPPONENT_WORDS: {', '.join(unrevealed('opponent'))}\n"
         f"CIVILIAN_WORDS: {', '.join(unrevealed('civilian'))}\n"
-        f"ASSASSIN_WORD: {', '.join(unrevealed('assassin'))}"
+        f"ASSASSIN_WORD: {', '.join(unrevealed('assassin'))}\n"
+        f"OPPONENT_PROGRESS: {opponent_gone} of {opponent_total} OPPONENT words "
+        f"revealed — {opponent_total - opponent_gone} more and the opposing team wins."
     )
     if revealed:
         revealed_line = ", ".join(

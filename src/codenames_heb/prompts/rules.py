@@ -25,5 +25,8 @@ against it as above, then the Codemaster gives the next clue against the
 updated board. Revealed words (and their true role) stay visible to both
 players for the rest of the game; only never-guessed words remain hidden.
 
-The team wins by finding all TARGET words; it loses immediately if the
-Guesser ever selects the ASSASSIN word."""
+The team wins by finding all TARGET words. It loses immediately if the
+Guesser ever selects the ASSASSIN word. Every OPPONENT word the Guesser
+selects is handed to the opposing team, so the team also loses if all
+OPPONENT words end up revealed — at that point the opposing team has all
+of its words and wins."""

@@ -453,9 +453,14 @@ def _play_game(
 
     revealed: dict[str, str] = {}
     target_words = set(board.words_with_role("target"))
+    # Revealing every OPPONENT word means the opposing team has found all of
+    # its own — a loss, exactly as in the physical game. Taken from the board
+    # rather than ROLE_COUNTS so a non-standard board scores by its own key.
+    opponent_words = set(board.words_with_role("opponent"))
     rounds: list[dict] = []
     stats: Counter = Counter()
     outcome = "max_rounds_reached"
+    loss_reason: str | None = None
     terminal_error: str | None = None
     consecutive_stalls = 0
 
@@ -509,11 +514,20 @@ def _play_game(
             }
         )
 
+        # The three terminal conditions cannot co-occur within one round — a
+        # non-target guess ends the round immediately, and `_play_round`
+        # returns as soon as the last target falls — but the order is written
+        # out anyway so it never has to be re-derived.
         if assassin_hit:
             outcome = "loss"
+            loss_reason = "assassin"
             break
         if target_words <= revealed.keys():
             outcome = "win"
+            break
+        if opponent_words <= revealed.keys():
+            outcome = "loss"
+            loss_reason = "opponent_words"
             break
 
         # A round that revealed nothing made no progress; repeating it just
@@ -532,10 +546,15 @@ def _play_game(
         **base,
         "status": "ok",
         "outcome": outcome,
+        # Which of the two ways the game was lost; None on any other outcome.
+        "loss_reason": loss_reason,
         "game_length": len(rounds),
         "targets_found": targets_found,
         "target_recovery_rate": targets_found / len(target_words) if target_words else None,
-        "assassin_hit": outcome == "loss",
+        # Must come from the event, not from `outcome`: a loss is no longer
+        # necessarily an assassin loss.
+        "assassin_hit": loss_reason == "assassin",
+        "opponent_words_revealed": len(opponent_words & revealed.keys()),
         "terminal_error": terminal_error,
         **_compliance_summary(stats),
         "rounds": rounds,
@@ -552,10 +571,12 @@ _CSV_FIELDNAMES = [
     "status",
     "stage",
     "outcome",
+    "loss_reason",
     "game_length",
     "targets_found",
     "target_recovery_rate",
     "assassin_hit",
+    "opponent_words_revealed",
     "codemaster_attempts",
     "codemaster_rejected",
     "codemaster_compliance_rate",
