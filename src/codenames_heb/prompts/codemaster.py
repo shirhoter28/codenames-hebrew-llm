@@ -46,9 +46,20 @@ def _format_board_section(board: Board, revealed: dict[str, str] | None = None) 
 
 
 def _required_count_line(required_count: int | None) -> str:
+    """The clue-count floor, when this arm of the run imposes one.
+
+    A floor rather than an exact requirement: it accepts any answer at or above
+    the minimum, so it rejects less often — and rejections are the main cost of
+    constraining a model far outside its usual behaviour (only 10% of rounds on
+    the 08-19 grid used count >= 3 voluntarily).
+    """
     if required_count is None:
         return ""
-    return f"\nYour clue must target exactly {required_count} words, chosen by you.\n"
+    return (
+        f"\nYour clue must point to AT LEAST {required_count} of YOUR_WORDS, so "
+        f"`count` must be {required_count} or more. A `count` of 0 does NOT "
+        f"satisfy this — 0 means an unlimited-guess clue, not an ambitious one.\n"
+    )
 
 
 _STRONG_HEBREW_TEMPLATE = """{game_rules}
@@ -108,10 +119,11 @@ word in intended_targets must be copied exactly, character-for-character,
 from YOUR_WORDS above. `count` must equal exactly the number of words in
 `intended_targets` — no more, no fewer.
 {required_count_line}
-Respond with JSON only: {{"clue": "...", "count": <int>,
-"intended_targets": ["..."],
-"translation_map": {{"he_word": "en_word", ...}},
-"en_clue": "...", "en_targets": ["..."]}}"""
+Answer in this key order — the translation work comes first, and the
+Hebrew clue last, so that each field is derived from the ones above it.
+Respond with JSON only: {{"translation_map": {{"he_word": "en_word", ...}},
+"en_targets": ["..."], "en_clue": "...",
+"intended_targets": ["..."], "count": <int>, "clue": "..."}}"""
 
 
 def build_translate_pipeline_prompt(
@@ -154,16 +166,25 @@ def parse_codemaster_response(data: dict) -> CodemasterResponse:
 
 
 def build_correction_note(
-    error: str, board: Board, revealed: dict[str, str] | None = None
+    error: str, board: Board, revealed: dict[str, str] | None = None,
+    required_count: int | None = None,
 ) -> str:
     """Text appended to the user prompt when re-asking after a rejection.
 
     Without this, a retry re-sends the identical prompt and the model has no
     reason to answer differently — observed in the 2026-08-16 pilot, where
-    all retries failed with the same error as the first attempt.
+    all retries failed with the same error as the first attempt. The floor is
+    restated for the same reason: a rejection for missing it, answered by a
+    note that never mentions it, is the identical failure.
     """
     revealed = revealed or {}
     available_targets = [w for w in board.words_with_role("target") if w not in revealed]
+    floor_line = (
+        f"- Your clue must point to at least {required_count} words: `count` must "
+        f"be {required_count} or more, and never 0.\n"
+        if required_count is not None
+        else ""
+    )
     return (
         "\n\nYOUR PREVIOUS RESPONSE WAS REJECTED.\n"
         f"Reason: {error}\n\n"
@@ -172,6 +193,7 @@ def build_correction_note(
         "- Every entry in intended_targets must be copied exactly, "
         f"character-for-character, from: {', '.join(available_targets)}\n"
         "- count must equal exactly the number of entries in intended_targets.\n"
+        f"{floor_line}"
         "Respond with valid JSON only, in the format given above."
     )
 

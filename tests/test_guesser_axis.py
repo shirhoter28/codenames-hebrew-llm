@@ -146,7 +146,7 @@ def test_tasks_cover_the_full_grid_exactly_once():
     tasks = _ordered_tasks(config, boards)
 
     assert len(tasks) == 4 * 4 * 1 * 5 * 1
-    pairs = {(model, guesser) for model, guesser, _, _, _ in tasks}
+    pairs = {(model, guesser) for model, guesser, _, _, _, _ in tasks}
     assert len(pairs) == 16
 
 

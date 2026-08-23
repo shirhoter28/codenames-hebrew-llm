@@ -20,3 +20,14 @@ def test_classifies_each_known_validator_message():
 
 def test_unrecognized_message_falls_back_to_other():
     assert classify_error("something nobody has seen before") == "other"
+
+
+def test_a_count_below_the_floor_is_its_own_reason():
+    # Must classify before the generic count_mismatch entry: both messages
+    # mention a count, and conflating them would hide how often the floor is
+    # what the model failed to meet.
+    assert classify_error("count 1 is below the required floor of 3") == "count_below_floor"
+
+
+def test_the_floor_reason_does_not_swallow_a_plain_count_mismatch():
+    assert classify_error("count 3 != len(intended_targets) 1") == "count_mismatch"

@@ -4,6 +4,7 @@ from codenames_heb.board import Board
 from codenames_heb.prompts.codemaster import (
     PROMPT_METHODS,
     CodemasterResponse,
+    build_correction_note,
     build_strong_hebrew_prompt,
     build_translate_pipeline_prompt,
     parse_codemaster_response,
@@ -33,13 +34,13 @@ def test_strong_hebrew_prompt_includes_all_role_groups():
 def test_strong_hebrew_prompt_includes_required_count_when_set():
     system, _ = build_strong_hebrew_prompt(_board(), required_count=2)
 
-    assert "target exactly 2 words, chosen by you" in system
+    assert "AT LEAST 2" in system
 
 
 def test_strong_hebrew_prompt_omits_required_count_line_when_none():
     system, _ = build_strong_hebrew_prompt(_board(), required_count=None)
 
-    assert "chosen by you" not in system
+    assert "AT LEAST" not in system
 
 
 def test_strong_hebrew_prompt_hides_unrevealed_roles_of_revealed_words():
@@ -253,3 +254,72 @@ def test_volunteered_reasoning_is_still_kept():
     )
 
     assert result.reasoning == "light"
+
+
+# --- clue-count floors ---------------------------------------------------
+#
+# The count constraint is a floor ("at least N"), not an exact requirement: a
+# floor accepts anything at or above the minimum, so it rejects less often —
+# and rejections are the main cost risk of the M4 run.
+
+
+def test_the_floor_is_a_minimum_not_an_exact_requirement():
+    system, _ = build_strong_hebrew_prompt(_board(), required_count=3)
+
+    assert "AT LEAST 3" in system
+    assert "exactly 3" not in system
+
+
+def test_the_floor_line_rules_out_a_count_of_zero():
+    # count 0 means "unlimited guesses" under GAME_RULES, so it would otherwise
+    # slip under any floor numerically while meaning the opposite.
+    system, _ = build_strong_hebrew_prompt(_board(), required_count=2)
+
+    assert "0" in system
+    assert "unlimited" in system.lower()
+
+
+def test_translate_pipeline_carries_the_floor_too():
+    system, _ = build_translate_pipeline_prompt(_board(), required_count=2)
+
+    assert "AT LEAST 2" in system
+
+
+def test_correction_note_states_the_floor_when_one_applies():
+    note = build_correction_note("count 1 is below the floor", _board(), required_count=3)
+
+    assert "3" in note
+    assert "at least" in note.lower()
+
+
+def test_correction_note_says_nothing_about_a_floor_when_there_is_none():
+    note = build_correction_note("some other problem", _board())
+
+    assert "at least" not in note.lower()
+
+
+# --- translate_pipeline emits its translation work before the clue -------
+#
+# Generation is autoregressive: asking for `clue` first meant the Hebrew clue
+# was committed before any translation existed in the output, so "translate,
+# think in English, translate back" had nothing to condition on.
+
+
+def test_translate_pipeline_asks_for_the_translation_before_the_clue():
+    system, _ = build_translate_pipeline_prompt(_board())
+    spec = system.split("Respond with JSON only:")[1]
+
+    assert spec.index("translation_map") < spec.index('"clue"')
+    assert spec.index("en_targets") < spec.index('"clue"')
+    assert spec.index("en_clue") < spec.index('"clue"')
+
+
+def test_translate_pipeline_still_parses_by_key_not_position():
+    # The reorder is a generation-order change only; parsing is by key.
+    result = parse_codemaster_response(
+        {"translation_map": {"ירח": "moon"}, "en_targets": ["moon"], "en_clue": "light",
+         "intended_targets": ["ירח"], "count": 1, "clue": "אור"}
+    )
+
+    assert result.clue == "אור"
+    assert result.en_clue == "light"

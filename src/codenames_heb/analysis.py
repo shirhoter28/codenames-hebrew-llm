@@ -62,7 +62,10 @@ STOP_CLASSES = (
 
 _MISS_OUTCOMES = frozenset({"hit_opponent", "hit_civilian", "hit_assassin"})
 
-GAME_KEY = ["run_id", "model", "method", "guesser_model", "board_style", "board_seed", "trial"]
+GAME_KEY = [
+    "run_id", "model", "method", "guesser_model", "count_constraint",
+    "board_style", "board_seed", "trial",
+]
 
 _COMPLIANCE_COLUMNS = [
     "codemaster_attempts",
@@ -495,6 +498,9 @@ def _build_game(row: dict, run_id: str, boards: dict, config: dict):
         "method": row.get("method"),
         # Older runs did not record the guesser per row; the run config knows it.
         "guesser_model": row.get("guesser_model") or config.get("guesser_model"),
+        # Everything before M4 was free choice. A string, not a nullable int:
+        # a column mixing None with int raises inside _sort_by_game.
+        "count_constraint": row.get("count_constraint") or "free",
         "board_style": style,
         "board_seed": seed,
         "trial": row.get("trial"),
@@ -621,6 +627,11 @@ def _build_rounds(raw_rounds: list, key: dict, is_dual: dict) -> list:
                 "clue": raw.get("clue"),
                 "en_clue": raw.get("en_clue"),
                 "intended_targets": raw.get("intended_targets") or [],
+                # The floor in force for this round, after capping to the
+                # targets still hidden. None on a free-choice round. Lets the
+                # analysis separate rounds where the FULL floor bound from
+                # rounds where the endgame capped it.
+                "required_count": raw.get("required_count"),
                 # Ambition: how many words the codemaster commits one clue to.
                 "count": count,
                 # Yield: how many targets that clue actually bought.

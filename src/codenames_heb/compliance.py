@@ -15,6 +15,9 @@ _REASON_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("clue_not_single_word", ("must be a single word",)),
     ("targets_not_on_board", ("intended_targets not on board",)),
     ("duplicate_targets", ("duplicate intended_targets",)),
+    # Before count_mismatch: both messages mention a count, and conflating
+    # them would hide how often the floor is what the model failed to meet.
+    ("count_below_floor", ("below the required floor",)),
     ("count_mismatch", ("!= len(intended_targets)",)),
     ("guess_not_available", ("not among currently guessable words",)),
     ("premature_stop", ("cannot stop before guessing",)),

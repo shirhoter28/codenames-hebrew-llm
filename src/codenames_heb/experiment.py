@@ -5,7 +5,7 @@ import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from itertools import zip_longest
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -45,6 +45,16 @@ _MAX_CONSECUTIVE_STALLS = 2
 # to the model it shares a family with, at the cost of no longer isolating
 # Codemaster skill from Guesser skill (a weak pair could fail at either end).
 SAME_AS_CODEMASTER = "same_as_codemaster"
+
+
+def count_constraint_label(count_floor: int | None) -> str:
+    """Name the arm a game belongs to: "free", "min2", "min3", ...
+
+    A string rather than a nullable int because the column is sorted and grouped
+    downstream, and a column mixing None with int raises inside pandas'
+    sort_values — the same reason older runs need a stable value to backfill.
+    """
+    return "free" if count_floor is None else f"min{count_floor}"
 
 
 def _compliance_summary(stats: Counter) -> dict:
@@ -121,6 +131,15 @@ class LLMCodemaster:
                         f"count {response.count} != len(intended_targets) "
                         f"{len(response.intended_targets)}"
                     )
+                # The count constraint is a floor, so anything at or above it
+                # passes. count 0 never does: it means an unlimited-guess clue,
+                # not an ambitious one, and would otherwise slip under by being
+                # numerically small.
+                if required_count is not None and response.count < required_count:
+                    raise ValueError(
+                        f"count {response.count} is below the required floor "
+                        f"of {required_count}"
+                    )
                 return asdict(response)
             except (FormatFailure, ValueError) as exc:
                 last_error = exc
@@ -129,7 +148,9 @@ class LLMCodemaster:
                     stats[f"reason:{classify_error(str(exc))}"] += 1
                 # Tell the model what it got wrong; re-sending the identical
                 # prompt just reproduces the same rejection.
-                user = base_user + build_codemaster_correction(str(exc), board, revealed)
+                user = base_user + build_codemaster_correction(
+                    str(exc), board, revealed, required_count
+                )
                 continue
         if stats is not None:
             stats["codemaster_call_failures"] += 1
@@ -203,6 +224,10 @@ class ExperimentConfig:
     board_styles: list[str]
     n_boards: int
     n_trials: int
+    # Clue-count floors crossed by the run. `None` is free choice; an int N
+    # requires every clue to point at N or more words. Defaults to free choice
+    # alone, so every config written before M4 loads unchanged.
+    count_constraints: list[int | None] = field(default_factory=lambda: [None])
     # Concurrent games. Defaults to 1 so a run is only ever parallel by explicit
     # choice. Capped at len(models), which bounds concurrent *codemaster* calls
     # per provider to one. The guesser side is bounded by ceil(max_workers /
@@ -224,6 +249,7 @@ _REQUIRED_CONFIG_KEYS = (
 
 _GUESSER_KEY = "guesser_model"
 _GUESSER_AXIS_KEY = "guesser_models"
+_COUNT_AXIS_KEY = "count_constraints"
 
 
 def load_config(path) -> ExperimentConfig:
@@ -301,6 +327,26 @@ def load_config(path) -> ExperimentConfig:
             f"a repeated guesser doubles that column's games and unbalances the grid"
         )
 
+    constraints = data.get(_COUNT_AXIS_KEY, [None])
+    if not isinstance(constraints, list) or not constraints:
+        raise ValueError(
+            f"Config {path}: {_COUNT_AXIS_KEY} must be a non-empty list, got {constraints!r}"
+        )
+    for value in constraints:
+        if value is None:
+            continue
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise ValueError(
+                f"Config {path}: every entry in {_COUNT_AXIS_KEY} must be null "
+                f"(free choice) or a positive integer, got {value!r}"
+            )
+    repeated = sorted({str(c) for c in constraints if constraints.count(c) > 1})
+    if repeated:
+        raise ValueError(
+            f"Config {path}: {_COUNT_AXIS_KEY} repeats {', '.join(repeated)}; "
+            f"a repeated level doubles that arm's games and unbalances the design"
+        )
+
     for key in ("n_boards", "n_trials"):
         value = data[key]
         if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
@@ -326,6 +372,7 @@ def load_config(path) -> ExperimentConfig:
         board_styles=styles,
         n_boards=data["n_boards"],
         n_trials=data["n_trials"],
+        count_constraints=constraints,
         max_workers=max_workers,
     )
 
@@ -401,6 +448,7 @@ def run_game(
     call_delay: float = 0.0,
     max_rounds: int | None = None,
     guesser_model: str | None = None,
+    count_floor: int | None = None,
 ) -> dict:
     """Play one game, timing it.
 
@@ -414,7 +462,7 @@ def run_game(
     t0 = time.monotonic()
     row = _play_game(
         codemaster, guesser, board, model, method, trial,
-        call_delay, max_rounds, guesser_model,
+        call_delay, max_rounds, guesser_model, count_floor,
     )
     return {
         **row,
@@ -433,6 +481,7 @@ def _play_game(
     call_delay: float = 0.0,
     max_rounds: int | None = None,
     guesser_model: str | None = None,
+    count_floor: int | None = None,
 ) -> dict:
     base = {
         "model": model,
@@ -443,6 +492,8 @@ def _play_game(
         "board_seed": board.seed,
         "board_style": board.style,
         "trial": trial,
+        # Which arm of the count-constraint axis this game belongs to.
+        "count_constraint": count_constraint_label(count_floor),
     }
     if max_rounds is None:
         # Safety backstop, not the expected path: a round that guesses at all
@@ -466,7 +517,17 @@ def _play_game(
 
     for round_num in range(1, max_rounds + 1):
         try:
-            cm = codemaster.give_clue(board, revealed=dict(revealed), stats=stats)
+            # Cap the floor at the targets still hidden. Without this, the
+            # endgame of every constrained game is unsatisfiable — 16.5% of
+            # rounds on the 08-19 grid had fewer than 3 targets left — and the
+            # model would burn all its retries and die as a codemaster_failure.
+            # The effective value is recorded per round, so the stricter
+            # analysis (rounds where the FULL floor applied) stays recoverable.
+            available = len(target_words - revealed.keys())
+            effective_floor = min(count_floor, available) if count_floor else None
+            cm = codemaster.give_clue(
+                board, effective_floor, revealed=dict(revealed), stats=stats
+            )
         except FormatFailure as exc:
             # No clue means no round to play. End the game but keep every
             # round already completed.
@@ -507,6 +568,7 @@ def _play_game(
         rounds.append(
             {
                 "round": round_num,
+                "required_count": effective_floor,
                 **cm,
                 "guess_sequence": guess_sequence,
                 "error": round_error,
@@ -568,6 +630,7 @@ _CSV_FIELDNAMES = [
     "board_seed",
     "board_style",
     "trial",
+    "count_constraint",
     "status",
     "stage",
     "outcome",
@@ -594,7 +657,10 @@ _CSV_FIELDNAMES = [
 # Rows are written to raw.jsonl in completion order once games run
 # concurrently, so the rolled-up CSV is sorted to stay deterministic and
 # diffable across runs.
-_CSV_SORT_KEY = ("model", "method", "guesser_model", "board_style", "board_seed", "trial")
+_CSV_SORT_KEY = (
+    "model", "method", "guesser_model", "count_constraint",
+    "board_style", "board_seed", "trial",
+)
 
 
 def _write_metrics_csv(rows: list[dict], path: Path) -> None:
@@ -646,6 +712,7 @@ def _write_run_manifest(
             {
                 "max_workers": max_workers,
                 "guesser_models": list(config.guesser_models),
+                "count_constraints": list(config.count_constraints),
                 "n_pairs": len(config.models) * len(config.guesser_models),
                 "dispatch": "latin_square",
             },
@@ -666,6 +733,8 @@ def _game_key(row: dict) -> tuple:
         row.get("model"),
         row.get("guesser_model"),
         row.get("method"),
+        # Rows written before M4 carry no constraint; they were all free choice.
+        row.get("count_constraint") or "free",
         row.get("board_style"),
         row.get("board_seed"),
         row.get("trial"),
@@ -673,8 +742,9 @@ def _game_key(row: dict) -> tuple:
 
 
 def _task_key(task: tuple) -> tuple:
-    model, guesser, method, board, trial = task
-    return (model, guesser, method, board.style, board.seed, trial)
+    model, guesser, method, floor, board, trial = task
+    return (model, guesser, method, count_constraint_label(floor),
+            board.style, board.seed, trial)
 
 
 def _read_raw_rows(run_dir: Path) -> list[dict]:
@@ -713,7 +783,7 @@ def _check_resume_matches(
     if recorded.exists():
         original = load_config(recorded)
         design = ("models", "guesser_models", "codemaster_prompt_methods",
-                  "board_styles", "n_boards", "n_trials")
+                  "board_styles", "n_boards", "n_trials", "count_constraints")
         differing = [
             f"{field}: {getattr(original, field)!r} -> {getattr(config, field)!r}"
             for field in design
@@ -768,8 +838,9 @@ def _ordered_tasks(config: ExperimentConfig, boards: list[Board]) -> list[tuple]
             guesser = config.guesser_models[(index + offset) % n_guessers]
             per_pair.append(
                 [
-                    (model, resolve_guesser(model, guesser), method, board, trial)
+                    (model, resolve_guesser(model, guesser), method, floor, board, trial)
                     for method in config.codemaster_prompt_methods
+                    for floor in config.count_constraints
                     for board in boards
                     for trial in range(config.n_trials)
                 ]
@@ -844,7 +915,7 @@ def run_experiment(
               flush=True)
 
     def play(task: tuple) -> dict:
-        model, guesser, method, board, trial = task
+        model, guesser, method, floor, board, trial = task
         try:
             return run_game(
                 codemasters[(model, method)],
@@ -855,12 +926,14 @@ def run_experiment(
                 trial,
                 call_delay=trial_delay,
                 guesser_model=guesser,
+                count_floor=floor,
             )
         except Exception as exc:  # a poisoned task must not take down the pool
             return {
                 "model": model,
                 "method": method,
                 "guesser_model": guesser,
+                "count_constraint": count_constraint_label(floor),
                 "board_seed": board.seed,
                 "board_style": board.style,
                 "trial": trial,

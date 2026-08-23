@@ -636,3 +636,47 @@ def test_an_old_loss_that_kept_its_opponent_words_is_labelled_an_assassin_loss(t
 
     assert games.loc[0, "loss_reason"] == "assassin"
     assert bool(games.loc[0, "rescored"]) is False
+
+
+# --- the clue-count constraint axis --------------------------------------
+
+
+def test_runs_without_a_count_constraint_backfill_as_free(tmp_path):
+    # Everything played before M4 was free choice; the column must be a stable
+    # string, because a column mixing None and int breaks _sort_by_game.
+    run_dir = _write_run(tmp_path, [_game(rounds=[_round()])])
+
+    games = load_run(run_dir).games
+
+    assert games.loc[0, "count_constraint"] == "free"
+
+
+def test_the_recorded_count_constraint_is_kept(tmp_path):
+    run_dir = _write_run(tmp_path, [_game(count_constraint="min3", rounds=[_round()])])
+
+    games = load_run(run_dir).games
+
+    assert games.loc[0, "count_constraint"] == "min3"
+
+
+def test_games_differing_only_by_constraint_are_distinct_rows(tmp_path):
+    rows = [
+        _game(count_constraint="free", rounds=[_round()]),
+        _game(count_constraint="min2", rounds=[_round()]),
+        _game(count_constraint="min3", rounds=[_round()]),
+    ]
+    run_dir = _write_run(tmp_path, rows)
+
+    games = load_run(run_dir).games
+
+    assert sorted(games["count_constraint"]) == ["free", "min2", "min3"]
+
+
+def test_the_round_table_carries_the_effective_floor(tmp_path):
+    # Capped rounds must be separable from rounds where the full floor applied.
+    rounds = [_round(round=1, required_count=3), _round(round=2, required_count=1)]
+    run_dir = _write_run(tmp_path, [_game(count_constraint="min3", game_length=2, rounds=rounds)])
+
+    table = load_run(run_dir).rounds
+
+    assert list(table["required_count"]) == [3, 1]

@@ -422,3 +422,62 @@ def test_adapters_default_to_six_retries():
     # model often needs more than one nudge to land a legal response.
     assert LLMCodemaster(client=None, model="m", method="strong_hebrew").max_retries == 6
     assert LLMGuesser(client=None, model="m").max_retries == 6
+
+
+# --- clue-count floors ---------------------------------------------------
+
+
+def test_llm_codemaster_rejects_a_count_below_the_floor_then_accepts():
+    client = FakeClient(
+        [
+            {"clue": "אור", "count": 1, "intended_targets": ["ירח"]},
+            {"clue": "אור", "count": 2, "intended_targets": ["ירח", "שמש"]},
+        ]
+    )
+    codemaster = LLMCodemaster(client=client, model="m", method="strong_hebrew")
+
+    result = codemaster.give_clue(_board_two_targets(), required_count=2)
+
+    assert result["count"] == 2
+    assert len(client.calls) == 2
+
+
+def test_llm_codemaster_rejects_a_count_of_zero_under_a_floor():
+    # count 0 means "unlimited guesses", not "a big clue" — it must not slip
+    # under a floor just by being numerically small.
+    zero = {"clue": "אור", "count": 0, "intended_targets": []}
+    client = FakeClient([zero, zero])
+    codemaster = LLMCodemaster(
+        client=client, model="m", method="strong_hebrew", max_retries=2
+    )
+
+    with pytest.raises(FormatFailure) as excinfo:
+        codemaster.give_clue(_board_two_targets(), required_count=2)
+
+    assert "below the required floor" in str(excinfo.value)
+
+
+def test_llm_codemaster_accepts_a_count_above_the_floor():
+    # It is a floor, not an exact requirement.
+    client = FakeClient([{"clue": "אור", "count": 2, "intended_targets": ["ירח", "שמש"]}])
+    codemaster = LLMCodemaster(client=client, model="m", method="strong_hebrew")
+
+    result = codemaster.give_clue(_board_two_targets(), required_count=1)
+
+    assert result["count"] == 2
+    assert len(client.calls) == 1
+
+
+def test_a_floor_rejection_is_counted_under_its_own_reason():
+    client = FakeClient(
+        [
+            {"clue": "אור", "count": 1, "intended_targets": ["ירח"]},
+            {"clue": "אור", "count": 2, "intended_targets": ["ירח", "שמש"]},
+        ]
+    )
+    codemaster = LLMCodemaster(client=client, model="m", method="strong_hebrew")
+    stats = Counter()
+
+    codemaster.give_clue(_board_two_targets(), required_count=2, stats=stats)
+
+    assert stats["reason:count_below_floor"] == 1

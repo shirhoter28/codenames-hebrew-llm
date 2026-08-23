@@ -37,6 +37,9 @@ _CANDIDATE_STRATA = (
     ["guesser_model"],
     ["model", "guesser_model"],
     ["model", "method"],
+    ["count_constraint"],
+    ["model", "count_constraint"],
+    ["count_constraint", "board_style"],
     ["board_style"],
     ["model", "board_style"],
     ["guesser_model", "board_style"],
@@ -49,6 +52,7 @@ _FACTOR_LABELS = {
     "model": "codemaster",
     "guesser_model": "guesser",
     "method": "prompt method",
+    "count_constraint": "clue count floor",
     "board_style": "board style",
 }
 
@@ -89,7 +93,7 @@ def _design_cols(games: pd.DataFrame) -> tuple:
     """
     return tuple(
         column
-        for column in ("model", "guesser_model", "method", "board_style")
+        for column in ("model", "guesser_model", "method", "count_constraint", "board_style")
         if column in games.columns and games[column].nunique(dropna=False) > 1
     )
 

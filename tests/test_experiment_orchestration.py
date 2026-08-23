@@ -9,6 +9,7 @@ from codenames_heb.board import Board, generate_board
 from codenames_heb.experiment import (
     SAME_AS_CODEMASTER,
     ExperimentConfig,
+    _task_key,
     load_config,
     run_experiment,
     run_game,
@@ -516,6 +517,7 @@ def test_run_experiment_writes_expected_number_of_rows(tmp_path):
             "board_seed",
             "board_style",
             "trial",
+            "count_constraint",
             "status",
             "stage",
             "outcome",
@@ -1038,3 +1040,143 @@ def test_a_win_carries_no_loss_reason():
     assert row["outcome"] == "win"
     assert row["loss_reason"] is None
     assert row["opponent_words_revealed"] == 0
+
+
+# --- clue-count floors ---------------------------------------------------
+#
+# `required_count` was plumbed through both prompt builders and the Codemaster
+# protocol from the start but never passed by `_play_game` — the same dead-hook
+# state `board_style` was in before M2. It becomes a crossed factor in M4.
+
+
+class RecordingCodemaster:
+    """Answers trivially, but remembers the floor it was handed each round."""
+
+    def __init__(self, targets_per_clue=1):
+        self.floors = []
+        self.targets_per_clue = targets_per_clue
+
+    def give_clue(self, board, required_count=None, revealed=None, stats=None):
+        self.floors.append(required_count)
+        available = [w for w in board.words_with_role("target") if w not in (revealed or {})]
+        picked = available[: self.targets_per_clue]
+        return {"clue": "x", "count": len(picked), "intended_targets": picked,
+                "reasoning": ""}
+
+
+def test_run_game_passes_the_configured_floor_to_the_codemaster():
+    codemaster = RecordingCodemaster()
+    guesser = StubGuesser(guesses=["t1", None, "t2", None, "t3"])
+
+    run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew",
+             trial=0, count_floor=2)
+
+    assert codemaster.floors[0] == 2
+
+
+def test_free_choice_passes_no_floor_at_all():
+    codemaster = RecordingCodemaster()
+    guesser = StubGuesser(guesses=["t1", None, "t2", None, "t3"])
+
+    run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
+
+    assert codemaster.floors == [None, None, None]
+
+
+def test_the_floor_is_capped_at_the_targets_still_hidden():
+    # 3 targets on this board. Once two are found a floor of 3 is unsatisfiable;
+    # capping keeps the game playable instead of burning six rejections.
+    codemaster = RecordingCodemaster(targets_per_clue=2)
+    guesser = StubGuesser(guesses=["t1", "t2", None, "t3"])
+
+    run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew",
+             trial=0, count_floor=3)
+
+    assert codemaster.floors == [3, 1]
+
+
+def test_the_effective_floor_is_recorded_on_every_round():
+    # Logged so the stricter analysis — rounds where the FULL floor applied —
+    # stays recoverable after the run.
+    codemaster = RecordingCodemaster(targets_per_clue=2)
+    guesser = StubGuesser(guesses=["t1", "t2", None, "t3"])
+
+    row = run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew",
+                   trial=0, count_floor=3)
+
+    assert [r["required_count"] for r in row["rounds"]] == [3, 1]
+
+
+def test_the_game_row_labels_which_constraint_arm_it_belongs_to():
+    codemaster = RecordingCodemaster()
+    guesser = StubGuesser(guesses=["t1", None, "t2", None, "t3"])
+
+    row = run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew",
+                   trial=0, count_floor=2)
+
+    assert row["count_constraint"] == "min2"
+
+
+def test_a_free_choice_game_is_labelled_free():
+    codemaster = RecordingCodemaster()
+    guesser = StubGuesser(guesses=["t1", None, "t2", None, "t3"])
+
+    row = run_game(codemaster, guesser, _board(), model="m", method="strong_hebrew", trial=0)
+
+    assert row["count_constraint"] == "free"
+
+
+# --- count_constraints as a crossed factor -------------------------------
+
+
+def test_count_constraints_default_to_free_choice_when_absent(tmp_path):
+    # Every config written before M4 omits the key; they must keep loading.
+    config = load_config(_write_config(tmp_path, _VALID_CONFIG_TEXT))
+
+    assert config.count_constraints == [None]
+
+
+def test_load_config_reads_the_count_constraint_axis(tmp_path):
+    path = _write_config(tmp_path, _VALID_CONFIG_TEXT + "count_constraints: [null, 2, 3]\n")
+
+    assert load_config(path).count_constraints == [None, 2, 3]
+
+
+def test_load_config_rejects_an_empty_count_constraint_list(tmp_path):
+    path = _write_config(tmp_path, _VALID_CONFIG_TEXT + "count_constraints: []\n")
+
+    with pytest.raises(ValueError, match="count_constraints"):
+        load_config(path)
+
+
+def test_load_config_rejects_a_non_positive_count_constraint(tmp_path):
+    path = _write_config(tmp_path, _VALID_CONFIG_TEXT + "count_constraints: [0]\n")
+
+    with pytest.raises(ValueError, match="count_constraints"):
+        load_config(path)
+
+
+def test_load_config_rejects_duplicate_count_constraints(tmp_path):
+    # A repeated level doubles that arm's games and unbalances the design.
+    path = _write_config(tmp_path, _VALID_CONFIG_TEXT + "count_constraints: [2, 2]\n")
+
+    with pytest.raises(ValueError, match="count_constraints"):
+        load_config(path)
+
+
+def test_the_grid_multiplies_by_the_count_constraint_axis():
+    from codenames_heb.board import generate_board
+    from codenames_heb.experiment import _ordered_tasks
+
+    config = ExperimentConfig(
+        models=["a", "b"], codemaster_prompt_methods=["strong_hebrew"],
+        guesser_models=["a", "b"], board_styles=["dual_50"], n_boards=2,
+        n_trials=1, count_constraints=[None, 2, 3],
+    )
+    wl = _word_lists()
+    boards = [generate_board(wl.regular, wl.dual, seed=i, style="dual_50") for i in range(2)]
+
+    tasks = _ordered_tasks(config, boards)
+
+    assert len(tasks) == 2 * 2 * 1 * 2 * 3          # models x guessers x methods x boards x floors
+    assert len({_task_key(t) for t in tasks}) == len(tasks)
