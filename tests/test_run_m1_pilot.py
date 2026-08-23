@@ -33,7 +33,7 @@ def test_main_wires_config_and_client_into_a_single_run(tmp_path, mocker):
         "n_trials: 1\n",
         encoding="utf-8",
     )
-    # "קשת" (target) and "אולימפוס" (assassin) are words actually placed on the
+    # "קרן" (target) and "יחידה" (assassin) are words actually placed on the
     # board generated for this config (real word lists + seed=0 + dual_50,
     # deterministic). Guessing the assassin immediately ends the game in one
     # round, keeping this a simple smoke test of main()'s wiring rather than
@@ -41,10 +41,10 @@ def test_main_wires_config_and_client_into_a_single_run(tmp_path, mocker):
     codemaster_json = {
         "clue": "בדיקה_קליט_ייחודי",
         "count": 1,
-        "intended_targets": ["קשת"],
+        "intended_targets": ["קרן"],
         "reasoning": "r",
     }
-    guess_json = {"action": "guess", "word": "אולימפוס"}
+    guess_json = {"action": "guess", "word": "יחידה"}
     fake_client = FakeClient([codemaster_json, guess_json])
     results_dir = tmp_path / "results"
 
