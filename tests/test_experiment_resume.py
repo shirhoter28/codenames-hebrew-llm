@@ -42,7 +42,7 @@ def _config(**overrides):
         models=["model-a", "model-b"],
         codemaster_prompt_methods=["strong_hebrew"],
         guesser_models=["model-a", "model-b"],
-        board_styles=["dual_50"],
+        board_styles=["natural"],
         n_boards=2,
         n_trials=1,
     )

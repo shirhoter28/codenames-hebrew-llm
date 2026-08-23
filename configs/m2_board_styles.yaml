@@ -1,9 +1,11 @@
 # M2: ambiguity as a controlled variable, under SELF-PLAY.
 #
-# The three styles form a 0% / 50% / 100% ladder of ambiguous (dual-list)
-# words per 25-word board, so any trend across them is attributable to lexical
-# ambiguity rather than to sampling noise. Evenly spaced, so the trend can be
-# tested as linear vs curved.
+# `natural` is the condition of record: 25 words dealt from the two lists
+# combined, the way a physical Hebrew deck deals them, so its ambiguity is
+# whatever the language actually hands a player (~26% dual on the current
+# lists, varying board to board). `dual_0` and `dual_100` bracket it — no
+# ambiguous words at all, and nothing but — so a result at `natural` can be
+# attributed to lexical ambiguity instead of merely reported alongside it.
 #
 # `guesser_model: same_as_codemaster` means each model guesses its own clues.
 # This removes the home-field advantage a single fixed guesser hands to the
@@ -27,7 +29,7 @@ codemaster_prompt_methods:
 guesser_model: same_as_codemaster
 board_styles:
   - dual_0
-  - dual_50
+  - natural
   - dual_100
 n_boards: 5
 n_trials: 1

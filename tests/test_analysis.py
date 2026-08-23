@@ -228,7 +228,7 @@ def _write_run(tmp_path, rows, boards=None, config=None):
 def _game(**overrides):
     game = {
         "model": "m", "method": "strong_hebrew", "guesser_model": "g",
-        "board_seed": 0, "board_style": "dual_50", "trial": 0,
+        "board_seed": 0, "board_style": "natural", "trial": 0,
         "status": "ok", "outcome": "win", "game_length": 1,
         "targets_found": 9, "target_recovery_rate": 1.0, "assassin_hit": False,
         "terminal_error": None,
@@ -328,7 +328,7 @@ def test_round_table_flags_whether_the_missed_word_was_ambiguous(tmp_path):
         ],
         turn_outcome="hit_civilian",
     )
-    boards = [{"seed": 0, "style": "dual_50", "words": ["t1", "t2", "x1"],
+    boards = [{"seed": 0, "style": "natural", "words": ["t1", "t2", "x1"],
                "roles": {"t1": "target", "t2": "target", "x1": "civilian"},
                "is_dual": {"t1": False, "t2": False, "x1": True}}]
     run_dir = _write_run(tmp_path, [_game(rounds=[missed])], boards=boards)
@@ -545,7 +545,7 @@ def _opponent_round(n_opponents: int, **overrides):
     return rnd
 
 
-def _board_json(n_opponents=8, seed=0, style="dual_50"):
+def _board_json(n_opponents=8, seed=0, style="natural"):
     roles = {f"o{i}": "opponent" for i in range(n_opponents)}
     roles.update({f"t{i}": "target" for i in range(9)})
     return [{"seed": seed, "style": style, "words": list(roles), "roles": roles,

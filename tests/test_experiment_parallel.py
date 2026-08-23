@@ -30,7 +30,7 @@ def _config(**overrides) -> ExperimentConfig:
         models=["model-a"],
         codemaster_prompt_methods=["strong_hebrew"],
         guesser_models=["guesser-model"],
-        board_styles=["dual_50"],
+        board_styles=["natural"],
         n_boards=2,
         n_trials=1,
     )
@@ -184,7 +184,7 @@ def test_tasks_interleave_by_model_so_workers_hit_different_providers():
     from codenames_heb.board import generate_board
 
     words = _word_lists()
-    boards = [generate_board(words.regular, words.dual, seed=i, style="dual_50") for i in (0, 1)]
+    boards = [generate_board(words.regular, words.dual, seed=i, style="natural") for i in (0, 1)]
 
     order = [t[0] for t in _ordered_tasks(_config(models=["a", "b", "c"], n_boards=2), boards)]
 
@@ -205,7 +205,7 @@ _CONFIG_TEXT = (
     "models: [model-a]\n"
     "codemaster_prompt_methods: [strong_hebrew]\n"
     "guesser_model: guesser-model\n"
-    "board_styles: [dual_50]\n"
+    "board_styles: [natural]\n"
     "n_boards: 2\n"
     "n_trials: 1\n"
 )

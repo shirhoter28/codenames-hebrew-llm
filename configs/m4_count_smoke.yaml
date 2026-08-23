@@ -44,7 +44,7 @@ count_constraints:
   - 2
   - 3
 board_styles:
-  - dual_50
+  - natural
 n_boards: 1
 n_trials: 1
 max_workers: 4

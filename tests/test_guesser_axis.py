@@ -37,7 +37,7 @@ def _complaint(excinfo, path) -> str:
 _BASE = (
     "models: [model-a, model-b]\n"
     "codemaster_prompt_methods: [strong_hebrew]\n"
-    "board_styles: [dual_50]\n"
+    "board_styles: [natural]\n"
     "n_boards: 1\n"
     "n_trials: 1\n"
 )
@@ -109,7 +109,7 @@ def test_a_narrow_guesser_axis_does_not_shrink_the_worker_cap(tmp_path):
         "models: [model-a, model-b, model-c]\n"
         "codemaster_prompt_methods: [strong_hebrew]\n"
         "guesser_model: only-guesser\n"
-        "board_styles: [dual_50]\n"
+        "board_styles: [natural]\n"
         "n_boards: 1\n"
         "n_trials: 1\n"
         "max_workers: 3\n",
@@ -124,7 +124,7 @@ def test_a_narrow_guesser_axis_does_not_shrink_the_worker_cap(tmp_path):
 class _FakeBoard:
     def __init__(self, seed):
         self.seed = seed
-        self.style = "dual_50"
+        self.style = "natural"
 
 
 def _grid_config(n_models=4, n_guessers=4, n_boards=5):
@@ -132,7 +132,7 @@ def _grid_config(n_models=4, n_guessers=4, n_boards=5):
         models=[f"m{i}" for i in range(n_models)],
         codemaster_prompt_methods=["strong_hebrew"],
         guesser_models=[f"m{i}" for i in range(n_guessers)],
-        board_styles=["dual_50"],
+        board_styles=["natural"],
         n_boards=n_boards,
         n_trials=1,
         max_workers=min(n_models, n_guessers),
@@ -208,7 +208,7 @@ def test_self_play_sentinel_resolves_to_each_codemaster_in_the_task_list():
         models=["m0", "m1"],
         codemaster_prompt_methods=["strong_hebrew"],
         guesser_models=[SAME_AS_CODEMASTER],
-        board_styles=["dual_50"],
+        board_styles=["natural"],
         n_boards=1,
         n_trials=1,
     )

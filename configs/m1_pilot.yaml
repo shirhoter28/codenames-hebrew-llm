@@ -8,6 +8,6 @@ codemaster_prompt_methods:
   - translate_pipeline
 guesser_model: meta-llama/llama-3.3-70b-instruct
 board_styles:
-  - dual_50
+  - natural
 n_boards: 10
 n_trials: 3

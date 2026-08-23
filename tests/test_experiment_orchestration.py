@@ -5,7 +5,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from codenames_heb.board import Board, dual_count, generate_board
+from codenames_heb.board import (
+    BOARD_SIZE,
+    Board,
+    draws_freely,
+    dual_count,
+    generate_board,
+)
 from codenames_heb.experiment import (
     SAME_AS_CODEMASTER,
     ExperimentConfig,
@@ -454,7 +460,7 @@ def test_load_config_reads_yaml(tmp_path):
         "models: [model-a, model-b]\n"
         "codemaster_prompt_methods: [strong_hebrew, translate_pipeline]\n"
         "guesser_model: guesser-model\n"
-        "board_styles: [dual_50]\n"
+        "board_styles: [natural]\n"
         "n_boards: 2\n"
         "n_trials: 1\n",
         encoding="utf-8",
@@ -466,7 +472,7 @@ def test_load_config_reads_yaml(tmp_path):
         models=["model-a", "model-b"],
         codemaster_prompt_methods=["strong_hebrew", "translate_pipeline"],
         guesser_models=["guesser-model"],
-        board_styles=["dual_50"],
+        board_styles=["natural"],
         n_boards=2,
         n_trials=1,
     )
@@ -487,7 +493,7 @@ def test_run_experiment_writes_expected_number_of_rows(tmp_path):
         models=["model-a", "model-b"],
         codemaster_prompt_methods=["strong_hebrew"],
         guesser_models=["guesser-model"],
-        board_styles=["dual_50"],
+        board_styles=["natural"],
         n_boards=2,
         n_trials=2,
     )
@@ -550,7 +556,7 @@ def test_run_experiment_reuses_same_boards_across_models(tmp_path):
         models=["model-a", "model-b"],
         codemaster_prompt_methods=["strong_hebrew"],
         guesser_models=["guesser-model"],
-        board_styles=["dual_50"],
+        board_styles=["natural"],
         n_boards=1,
         n_trials=1,
     )
@@ -572,7 +578,7 @@ def test_run_experiment_reuses_same_boards_across_models(tmp_path):
 
 def test_run_experiment_generates_n_boards_for_every_style(tmp_path):
     config = _tiny_config(
-        board_styles=["dual_0", "dual_50", "dual_100"], n_boards=2, n_trials=1
+        board_styles=["dual_0", "natural", "dual_100"], n_boards=2, n_trials=1
     )
     make_codemaster, make_guesser = _stub_factories()
 
@@ -588,15 +594,21 @@ def test_run_experiment_generates_n_boards_for_every_style(tmp_path):
     boards = json.loads((run_dir / "boards.json").read_text(encoding="utf-8"))
     assert [(b["style"], b["seed"]) for b in boards] == [
         ("dual_0", 0), ("dual_0", 1),
-        ("dual_50", 0), ("dual_50", 1),
+        ("natural", 0), ("natural", 1),
         ("dual_100", 0), ("dual_100", 1),
     ]
     # The style label has to match the board's actual composition, or the
-    # independent variable is mislabelled in every downstream analysis.
+    # independent variable is mislabelled in every downstream analysis. A fixed
+    # style owes an exact count; `natural` owes only that the words it flagged
+    # dual really are dual, since its count is left to the draw.
+    dual_pool = set(_word_lists().dual)
     for entry in boards:
-        assert sum(entry["is_dual"].values()) == dual_count(
-            entry["style"], entry["seed"]
-        )
+        flagged = {w for w, is_dual in entry["is_dual"].items() if is_dual}
+        assert flagged <= dual_pool
+        if draws_freely(entry["style"]):
+            assert len(entry["is_dual"]) == BOARD_SIZE
+        else:
+            assert len(flagged) == dual_count(entry["style"], entry["seed"])
 
 
 def test_run_experiment_tags_every_result_row_with_its_board_style(tmp_path):
@@ -627,7 +639,7 @@ _VALID_CONFIG_TEXT = (
     "models: [model-a]\n"
     "codemaster_prompt_methods: [strong_hebrew]\n"
     "guesser_model: guesser-model\n"
-    "board_styles: [dual_50]\n"
+    "board_styles: [natural]\n"
     "n_boards: 2\n"
     "n_trials: 1\n"
 )
@@ -730,7 +742,7 @@ def test_load_config_rejects_non_positive_n_trials(tmp_path):
 
 def test_load_config_rejects_unknown_board_style(tmp_path):
     path = _write_config(
-        tmp_path, _VALID_CONFIG_TEXT.replace("[dual_50]", "[standard]")
+        tmp_path, _VALID_CONFIG_TEXT.replace("[natural]", "[standard]")
     )
 
     with pytest.raises(ValueError) as excinfo:
@@ -738,19 +750,19 @@ def test_load_config_rejects_unknown_board_style(tmp_path):
 
     message = str(excinfo.value)
     assert "standard" in message
-    assert "dual_50" in message  # valid options are listed
+    assert "natural" in message  # valid options are listed
     assert "dual_100" in message
 
 
 def test_load_config_rejects_empty_board_style_list(tmp_path):
-    path = _write_config(tmp_path, _VALID_CONFIG_TEXT.replace("[dual_50]", "[]"))
+    path = _write_config(tmp_path, _VALID_CONFIG_TEXT.replace("[natural]", "[]"))
 
     with pytest.raises(ValueError):
         load_config(path)
 
 
 def test_load_config_rejects_non_list_board_styles(tmp_path):
-    path = _write_config(tmp_path, _VALID_CONFIG_TEXT.replace("[dual_50]", "dual_50"))
+    path = _write_config(tmp_path, _VALID_CONFIG_TEXT.replace("[natural]", "natural"))
 
     with pytest.raises(ValueError):
         load_config(path)
@@ -759,22 +771,22 @@ def test_load_config_rejects_non_list_board_styles(tmp_path):
 def test_load_config_accepts_the_whole_ambiguity_ladder(tmp_path):
     path = _write_config(
         tmp_path,
-        _VALID_CONFIG_TEXT.replace("[dual_50]", "[dual_0, dual_50, dual_100]"),
+        _VALID_CONFIG_TEXT.replace("[natural]", "[dual_0, natural, dual_100]"),
     )
 
     config = load_config(path)
 
-    assert config.board_styles == ["dual_0", "dual_50", "dual_100"]
+    assert config.board_styles == ["dual_0", "natural", "dual_100"]
 
 
 def test_load_config_rejects_a_retired_board_style_and_says_it_is_retired(tmp_path):
     # A retired style still generates boards (so past runs re-analyse), which
     # would make it silently designable into a new run if load_config let it by.
     path = _write_config(
-        tmp_path, _VALID_CONFIG_TEXT.replace("[dual_50]", "[dual_50, dual_80]")
+        tmp_path, _VALID_CONFIG_TEXT.replace("[natural]", "[dual_50, dual_80]")
     )
 
-    with pytest.raises(ValueError, match=r"\['dual_80'\] are retired"):
+    with pytest.raises(ValueError, match=r"\['dual_50', 'dual_80'\] are retired"):
         load_config(path)
 
 
@@ -783,7 +795,7 @@ def test_load_config_accepts_the_real_m2_config():
         Path(__file__).resolve().parents[1] / "configs" / "m2_board_styles.yaml"
     )
 
-    assert config.board_styles == ["dual_0", "dual_50", "dual_100"]
+    assert config.board_styles == ["dual_0", "natural", "dual_100"]
 
 
 def test_load_config_accepts_the_real_pilot_config():
@@ -801,7 +813,7 @@ def _tiny_config(**overrides) -> ExperimentConfig:
         models=["model-a"],
         codemaster_prompt_methods=["strong_hebrew"],
         guesser_models=["guesser-model"],
-        board_styles=["dual_50"],
+        board_styles=["natural"],
         n_boards=2,
         n_trials=1,
     )
@@ -863,10 +875,10 @@ def test_run_experiment_writes_boards_json(tmp_path):
     assert [b["seed"] for b in boards] == [0, 1]
     words = _word_lists()
     for entry, seed in zip(boards, [0, 1]):
-        expected = generate_board(words.regular, words.dual, seed=seed, style="dual_50")
+        expected = generate_board(words.regular, words.dual, seed=seed, style="natural")
         assert entry["words"] == list(expected.words)
         assert entry["roles"] == dict(expected.roles)
-        assert entry["style"] == "dual_50"
+        assert entry["style"] == "natural"
         assert entry["is_dual"] == {w: expected.is_dual(w) for w in expected.words}
         assert len(entry["words"]) == 25
 
@@ -1182,11 +1194,11 @@ def test_the_grid_multiplies_by_the_count_constraint_axis():
 
     config = ExperimentConfig(
         models=["a", "b"], codemaster_prompt_methods=["strong_hebrew"],
-        guesser_models=["a", "b"], board_styles=["dual_50"], n_boards=2,
+        guesser_models=["a", "b"], board_styles=["natural"], n_boards=2,
         n_trials=1, count_constraints=[None, 2, 3],
     )
     wl = _word_lists()
-    boards = [generate_board(wl.regular, wl.dual, seed=i, style="dual_50") for i in range(2)]
+    boards = [generate_board(wl.regular, wl.dual, seed=i, style="natural") for i in range(2)]
 
     tasks = _ordered_tasks(config, boards)
 
@@ -1216,7 +1228,7 @@ def test_board_seed_offset_shifts_the_seed_range(tmp_path):
 
     config = ExperimentConfig(
         models=["m"], codemaster_prompt_methods=["strong_hebrew"],
-        guesser_models=["g"], board_styles=["dual_50"], n_boards=3,
+        guesser_models=["g"], board_styles=["natural"], n_boards=3,
         n_trials=1, board_seed_offset=5,
     )
 
@@ -1239,8 +1251,8 @@ def test_the_same_seed_produces_the_same_board_whatever_the_offset():
     from codenames_heb.board import generate_board
 
     wl = _word_lists()
-    a = generate_board(wl.regular, wl.dual, seed=7, style="dual_50")
-    b = generate_board(wl.regular, wl.dual, seed=7, style="dual_50")
+    a = generate_board(wl.regular, wl.dual, seed=7, style="natural")
+    b = generate_board(wl.regular, wl.dual, seed=7, style="natural")
 
     assert a.words == b.words
     assert dict(a.roles) == dict(b.roles)

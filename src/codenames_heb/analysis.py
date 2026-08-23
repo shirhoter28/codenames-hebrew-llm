@@ -29,7 +29,7 @@ from typing import Iterable, Sequence
 import pandas as pd
 import yaml
 
-from codenames_heb.board import ALL_BOARD_STYLES, BOARD_SIZE, ROLE_COUNTS
+from codenames_heb.board import BOARD_SIZE, BOARD_STYLE_LADDER, ROLE_COUNTS
 
 # Normal quantiles, hardcoded so the analysis layer needs no scipy: two-sided
 # 95% confidence, and 80% power.
@@ -45,14 +45,10 @@ OPPONENTS_PER_BOARD = ROLE_COUNTS["opponent"]
 COMPLETED_OUTCOMES = frozenset({"win", "loss"})
 
 # Board style is the designed independent variable; this is its plotting and
-# table order. Sorted by dual share so a retired style still lands at its own
-# rung of the ladder rather than after the active ones. Runs predating board
-# styles get "unspecified".
+# table order. Retired styles keep their own rung, so a report on an older run
+# still reads as a ladder. Runs predating board styles get "unspecified".
 UNSPECIFIED_STYLE = "unspecified"
-BOARD_STYLE_ORDER = (
-    *sorted(ALL_BOARD_STYLES, key=ALL_BOARD_STYLES.get),
-    UNSPECIFIED_STYLE,
-)
+BOARD_STYLE_ORDER = (*BOARD_STYLE_LADDER, UNSPECIFIED_STYLE)
 
 STOP_CLASSES = (
     "miss_before_quota",

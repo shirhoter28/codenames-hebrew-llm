@@ -26,7 +26,7 @@ report = _load_report_module()
 
 
 def _games(models=("a", "b"), guessers=("a", "b"), methods=("strong_hebrew",),
-           styles=("dual_0", "dual_50")):
+           styles=("dual_0", "natural")):
     rows = [
         {"model": m, "guesser_model": g, "method": meth, "board_style": s}
         for m in models
