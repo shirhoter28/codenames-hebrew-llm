@@ -1180,3 +1180,75 @@ def test_the_grid_multiplies_by_the_count_constraint_axis():
 
     assert len(tasks) == 2 * 2 * 1 * 2 * 3          # models x guessers x methods x boards x floors
     assert len({_task_key(t) for t in tasks}) == len(tasks)
+
+
+# --- board_seed_offset ---------------------------------------------------
+#
+# Boards are deterministic from (style, seed), so a later run can cover seeds
+# 40-99 and pool with an earlier one that covered 0-39 without replaying
+# anything. `--resume` cannot do this: `_check_resume_matches` refuses any
+# config change, `n_boards` included.
+
+
+def test_board_seed_offset_defaults_to_zero(tmp_path):
+    config = load_config(_write_config(tmp_path, _VALID_CONFIG_TEXT))
+
+    assert config.board_seed_offset == 0
+
+
+def test_board_seed_offset_shifts_the_seed_range(tmp_path):
+    seen = []
+
+    def make_codemaster(model, method):
+        return AutoCodemaster()
+
+    config = ExperimentConfig(
+        models=["m"], codemaster_prompt_methods=["strong_hebrew"],
+        guesser_models=["g"], board_styles=["dual_50"], n_boards=3,
+        n_trials=1, board_seed_offset=5,
+    )
+
+    class _Recorder:
+        def guess_one(self, words, clue, count, correct_so_far, revealed=None, stats=None):
+            return words[0] if words else None
+
+    run_dir = run_experiment(
+        config, _word_lists(), make_codemaster, lambda m: _Recorder(),
+        tmp_path, trial_delay=0,
+    )
+    boards = json.loads((run_dir / "boards.json").read_text(encoding="utf-8"))
+    seen = sorted(b["seed"] for b in boards)
+
+    assert seen == [5, 6, 7]
+
+
+def test_the_same_seed_produces_the_same_board_whatever_the_offset():
+    # This is what makes two runs poolable, so it is worth asserting directly.
+    from codenames_heb.board import generate_board
+
+    wl = _word_lists()
+    a = generate_board(wl.regular, wl.dual, seed=7, style="dual_50")
+    b = generate_board(wl.regular, wl.dual, seed=7, style="dual_50")
+
+    assert a.words == b.words
+    assert dict(a.roles) == dict(b.roles)
+
+
+def test_load_config_reads_the_board_seed_offset(tmp_path):
+    path = _write_config(tmp_path, _VALID_CONFIG_TEXT + "board_seed_offset: 40\n")
+
+    assert load_config(path).board_seed_offset == 40
+
+
+def test_load_config_rejects_a_negative_board_seed_offset(tmp_path):
+    path = _write_config(tmp_path, _VALID_CONFIG_TEXT + "board_seed_offset: -1\n")
+
+    with pytest.raises(ValueError, match="board_seed_offset"):
+        load_config(path)
+
+
+def test_load_config_rejects_a_non_integer_board_seed_offset(tmp_path):
+    path = _write_config(tmp_path, _VALID_CONFIG_TEXT + "board_seed_offset: 2.5\n")
+
+    with pytest.raises(ValueError, match="board_seed_offset"):
+        load_config(path)

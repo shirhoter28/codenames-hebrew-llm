@@ -138,3 +138,20 @@ def test_resume_refuses_a_config_that_does_not_match_the_run(tmp_path):
         _run(tmp_path, resume_from=run_dir, n_boards=5)
 
     assert "resume" in str(excinfo.value).lower()
+
+
+def test_resume_refuses_a_changed_board_seed_offset(tmp_path):
+    # A different offset means different boards entirely, so the games on disk
+    # do not belong to the grid the new config describes.
+    config = _config(board_seed_offset=0)
+    run_dir = run_experiment(
+        config, _word_lists(), lambda m, meth: _Codemaster(), lambda m: _Guesser(),
+        tmp_path, trial_delay=0,
+    )
+
+    with pytest.raises(ValueError, match="different design"):
+        run_experiment(
+            _config(board_seed_offset=10), _word_lists(),
+            lambda m, meth: _Codemaster(), lambda m: _Guesser(),
+            tmp_path, trial_delay=0, resume_from=run_dir,
+        )

@@ -228,6 +228,11 @@ class ExperimentConfig:
     # requires every clue to point at N or more words. Defaults to free choice
     # alone, so every config written before M4 loads unchanged.
     count_constraints: list[int | None] = field(default_factory=lambda: [None])
+    # First board seed to generate. Boards are deterministic from (style, seed),
+    # so a later run can cover seeds 40-99 and pool with an earlier one that
+    # covered 0-39 without replaying a single game. `--resume` cannot do this:
+    # `_check_resume_matches` refuses any config change, n_boards included.
+    board_seed_offset: int = 0
     # Concurrent games. Defaults to 1 so a run is only ever parallel by explicit
     # choice. Capped at len(models), which bounds concurrent *codemaster* calls
     # per provider to one. The guesser side is bounded by ceil(max_workers /
@@ -352,6 +357,13 @@ def load_config(path) -> ExperimentConfig:
         if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
             raise ValueError(f"Config {path}: {key} must be a positive integer, got {value!r}")
 
+    seed_offset = data.get("board_seed_offset", 0)
+    if not isinstance(seed_offset, int) or isinstance(seed_offset, bool) or seed_offset < 0:
+        raise ValueError(
+            f"Config {path}: board_seed_offset must be a non-negative integer, "
+            f"got {seed_offset!r}"
+        )
+
     max_workers = data.get("max_workers", 1)
     if not isinstance(max_workers, int) or isinstance(max_workers, bool) or max_workers <= 0:
         raise ValueError(
@@ -373,6 +385,7 @@ def load_config(path) -> ExperimentConfig:
         n_boards=data["n_boards"],
         n_trials=data["n_trials"],
         count_constraints=constraints,
+        board_seed_offset=seed_offset,
         max_workers=max_workers,
     )
 
@@ -713,6 +726,10 @@ def _write_run_manifest(
                 "max_workers": max_workers,
                 "guesser_models": list(config.guesser_models),
                 "count_constraints": list(config.count_constraints),
+                "board_seeds": [
+                    config.board_seed_offset,
+                    config.board_seed_offset + config.n_boards - 1,
+                ],
                 "n_pairs": len(config.models) * len(config.guesser_models),
                 "dispatch": "latin_square",
             },
@@ -783,7 +800,8 @@ def _check_resume_matches(
     if recorded.exists():
         original = load_config(recorded)
         design = ("models", "guesser_models", "codemaster_prompt_methods",
-                  "board_styles", "n_boards", "n_trials", "count_constraints")
+                  "board_styles", "n_boards", "n_trials", "count_constraints",
+                  "board_seed_offset")
         differing = [
             f"{field}: {getattr(original, field)!r} -> {getattr(config, field)!r}"
             for field in design
@@ -877,7 +895,9 @@ def run_experiment(
     boards = [
         generate_board(word_lists.regular, word_lists.dual, seed=i, style=style)
         for style in config.board_styles
-        for i in range(config.n_boards)
+        for i in range(
+            config.board_seed_offset, config.board_seed_offset + config.n_boards
+        )
     ]
 
     done: set = set()
