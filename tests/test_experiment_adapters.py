@@ -481,3 +481,43 @@ def test_a_floor_rejection_is_counted_under_its_own_reason():
     codemaster.give_clue(_board_two_targets(), required_count=2, stats=stats)
 
     assert stats["reason:count_below_floor"] == 1
+
+
+# --- the log must record generation order, not our field declaration order ---
+#
+# `asdict()` emits dataclass field order, so raw.jsonl looked identical whether
+# or not translate_pipeline's reordered prompt had any effect — the one thing
+# the reorder was supposed to change was invisible in the data.
+
+
+def test_the_returned_payload_keeps_the_order_the_model_emitted():
+    client = FakeClient(
+        [
+            {
+                "translation_map": {"ירח": "moon"},
+                "en_targets": ["moon"],
+                "en_clue": "light",
+                "intended_targets": ["ירח"],
+                "count": 1,
+                "clue": "אור",
+            }
+        ]
+    )
+    codemaster = LLMCodemaster(client=client, model="m", method="translate_pipeline")
+
+    result = codemaster.give_clue(_board())
+
+    assert list(result)[:6] == [
+        "translation_map", "en_targets", "en_clue", "intended_targets", "count", "clue",
+    ]
+
+
+def test_fields_the_model_omitted_are_still_present_afterwards():
+    client = FakeClient([{"clue": "אור", "count": 1, "intended_targets": ["ירח"]}])
+    codemaster = LLMCodemaster(client=client, model="m", method="strong_hebrew")
+
+    result = codemaster.give_clue(_board())
+
+    assert list(result)[:3] == ["clue", "count", "intended_targets"]
+    assert result["reasoning"] == ""
+    assert result["translation_map"] is None

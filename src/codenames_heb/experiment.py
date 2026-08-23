@@ -145,7 +145,15 @@ class LLMCodemaster:
                         f"count {response.count} is below the required floor "
                         f"of {required_count}"
                     )
-                return asdict(response)
+                # Record the order the model actually emitted, not our
+                # dataclass's field order. `translate_pipeline` asks for the
+                # translation before the clue, and whether a model honours that
+                # is the whole claim of the method — `asdict()` alone would
+                # discard the only evidence of it.
+                payload = asdict(response)
+                ordered = {key: payload[key] for key in data if key in payload}
+                ordered.update({k: v for k, v in payload.items() if k not in ordered})
+                return ordered
             except (FormatFailure, ValueError) as exc:
                 last_error = exc
                 if stats is not None:
