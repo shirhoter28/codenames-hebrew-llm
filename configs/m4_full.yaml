@@ -1,0 +1,89 @@
+# M4 FULL FACTORIAL — ambiguity x clue-count constraint x prompt method x pair.
+#
+# 4 codemasters x 4 guessers x 2 methods x 3 count constraints x 3 board styles
+#   x 30 boards = 288 cells, 8,640 games.
+#
+# BUDGET (from measured per-call timings, `reasoning` already dropped)
+#
+#   wall clock   ~91 h (3.8 days) at max_workers: 4
+#   cost         ~$37
+#   calls        ~200k
+#
+# Cost is not the constraint; wall clock is. `max_workers` is capped at
+# len(models) by design — concentrating calls on one provider is what killed a
+# 180-game run on 2026-08-10.
+#
+# THE PRIMARY QUESTION IS THE BOARD STYLE, AND IT IS THE HARDEST TO RESOLVE
+#
+# Board style is the only BETWEEN-board contrast here: dual_0 and dual_100 are
+# different boards, so board-to-board luck lands on one side of that comparison
+# and not the other. Every other factor is blocked — all four codemasters, both
+# methods and all three constraints play the SAME boards, so board luck cancels.
+# That is why 30 boards buys 0.052 on ambiguity while the same run buys 0.015 on
+# prompt method. Read the power table before reading any style comparison:
+#
+#   comparison                mdd_lift   mdd_win   mdd_game_length
+#   board style (PRIMARY)       0.052     0.133      1.35 rounds
+#   prompt method               0.015       —          —
+#   count constraint            0.019       —          —
+#   codemaster / guesser        0.022       —          —
+#
+# For scale: the best-to-worst codemaster spread on the 08-19 grid was 0.302
+# lift, and that run resolved main effects only at 0.093.
+#
+# WHY THESE THREE BOARD STYLES
+#
+# `natural` is the primary condition — 25 words drawn from the two lists
+# combined, ambiguity left to the draw (26.2% mean, sd 7.5pp, range 12-44%),
+# which is how a physical Hebrew deck actually deals. dual_0 and dual_100
+# bracket it so a natural-board result is attributable rather than merely
+# observed. The rungs are NOT evenly spaced (0 / 26.2 / 100), so this is a
+# bracket design, not a dose-response ladder — do not fit a trend to it.
+#
+# Note dual_100 is the weakest rung: it draws 25 words from a 100-word pool, so
+# any two dual_100 boards share ~6 of their 25 words, against ~2 for dual_0
+# (278-word pool) and ~1.7 for natural (378). Its effective board count is below
+# its nominal 30.
+#
+# COUNT CONSTRAINTS
+#
+# A floor, not an exact count: `min2` means count >= 2. The floor is capped at
+# the targets still hidden, so the endgame stays playable, and the effective
+# per-round floor is logged in `required_count`. On the smoke, floors cost
+# nothing — codemaster calls per round were 1.28 free / 1.16 min2 / 1.23 min3,
+# and `count_below_floor` never fired.
+#
+# WATCH `min2`. On the smoke its mean ambition (2.37) matched free choice (2.34)
+# — the floor removed the 1s but also the 4s and 5s. One board is not evidence,
+# but if that holds here, the arm is a weak treatment.
+#
+# NOT COMPARABLE WITH EARLIER RUNS
+#
+# The word lists were re-audited on 2026-08-23 (191+189 -> 278+100 words), so
+# every board seed draws different words than it did before. Nothing here pools
+# with any run made before that commit.
+models:
+  - google/gemini-2.5-flash
+  - meta-llama/llama-3.3-70b-instruct
+  - openai/gpt-4o-mini
+  - qwen/qwen3.5-9b
+guesser_models:
+  - google/gemini-2.5-flash
+  - meta-llama/llama-3.3-70b-instruct
+  - openai/gpt-4o-mini
+  - qwen/qwen3.5-9b
+codemaster_prompt_methods:
+  - strong_hebrew
+  - translate_pipeline
+count_constraints:
+  - null
+  - 2
+  - 3
+board_styles:
+  - dual_0
+  - natural
+  - dual_100
+n_boards: 30
+n_trials: 1
+board_seed_offset: 0
+max_workers: 4
