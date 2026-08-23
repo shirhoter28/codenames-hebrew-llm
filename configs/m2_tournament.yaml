@@ -26,8 +26,12 @@
 # lost by a chain of ~9 guesses, while lift scores the one guess each clue is
 # most directly responsible for.
 #
-# 4 models x 2 methods x 4 styles x 10 boards x 1 trial = 320 games, ~8.5k
+# 4 models x 2 methods x 3 styles x 10 boards x 1 trial = 240 games, ~6.4k
 # OpenRouter calls at the pilot's observed 26.5 calls/game.
+#
+# NOTE: the completed 2026-08-17 run of this config was 320 games over a FOUR-
+# style ladder and a different regular/dual split (DECISIONS.md, 2026-08-23).
+# Re-running this config does not reproduce that run.
 #
 # WHY max_workers: 4
 #
@@ -53,7 +57,6 @@ guesser_model: anthropic/claude-haiku-4.5
 board_styles:
   - dual_0
   - dual_50
-  - dual_80
   - dual_100
 n_boards: 10
 n_trials: 1

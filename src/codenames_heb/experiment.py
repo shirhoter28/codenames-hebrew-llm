@@ -12,7 +12,12 @@ from typing import Any, Callable
 
 import yaml
 
-from codenames_heb.board import BOARD_STYLES, Board, generate_board
+from codenames_heb.board import (
+    BOARD_STYLES,
+    RETIRED_BOARD_STYLES,
+    Board,
+    generate_board,
+)
 from codenames_heb.compliance import classify_error
 from codenames_heb.llm_client import FormatFailure
 from codenames_heb.metrics import compute_round_metrics
@@ -287,11 +292,16 @@ def load_config(path) -> ExperimentConfig:
         raise ValueError(
             f"Config {path}: board_styles must be a non-empty list, got {styles!r}"
         )
+    # Only the active ladder may be designed into a new run. Retired styles stay
+    # loadable in `board.py` so past runs regenerate and re-analyse, but naming
+    # one here would silently produce a level the current design doesn't have.
     unknown_styles = [s for s in styles if s not in BOARD_STYLES]
     if unknown_styles:
+        retired = sorted(set(unknown_styles) & set(RETIRED_BOARD_STYLES))
+        detail = f"; {retired} are retired and can no longer be run" if retired else ""
         raise ValueError(
             f"Config {path}: unknown board_styles {unknown_styles}; "
-            f"valid options are {sorted(BOARD_STYLES)}"
+            f"valid options are {sorted(BOARD_STYLES)}{detail}"
         )
 
     if _GUESSER_KEY in data and _GUESSER_AXIS_KEY in data:

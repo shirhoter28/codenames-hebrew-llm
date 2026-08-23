@@ -1,6 +1,13 @@
 import pytest
 
-from codenames_heb.board import BOARD_SIZE, BOARD_STYLES, ROLE_COUNTS, generate_board
+from codenames_heb.board import (
+    ALL_BOARD_STYLES,
+    BOARD_SIZE,
+    BOARD_STYLES,
+    RETIRED_BOARD_STYLES,
+    ROLE_COUNTS,
+    generate_board,
+)
 
 
 def _regular(n: int = 40) -> list[str]:
@@ -52,12 +59,12 @@ def test_generate_board_differs_for_different_seed():
 
 
 def test_generate_board_differs_across_styles_at_same_seed():
-    assert _board(seed=1, style="dual_50").words != _board(seed=1, style="dual_80").words
+    assert _board(seed=1, style="dual_50").words != _board(seed=1, style="dual_100").words
 
 
 @pytest.mark.parametrize(
     "style,expected",
-    [("dual_0", 0), ("dual_80", 20), ("dual_100", 25)],
+    [("dual_0", 0), ("dual_100", 25)],
 )
 def test_exact_styles_have_fixed_dual_counts(style, expected):
     for seed in range(6):
@@ -78,7 +85,7 @@ def test_dual_50_alternates_by_seed_parity_and_averages_exactly_half():
 
 
 def test_dual_words_are_a_subset_of_board_words():
-    board = _board(style="dual_80")
+    board = _board(style="dual_50")
 
     assert board.dual_words <= set(board.words)
     assert all(w.startswith("dual") for w in board.dual_words)
@@ -88,7 +95,7 @@ def test_words_are_shuffled_rather_than_grouped_by_pool():
     # If the two pools were merely concatenated, every dual word would sit
     # before every regular word and the ordering would leak which words are
     # ambiguous — prompts render the board in exactly this order.
-    board = _board(style="dual_80")
+    board = _board(style="dual_50")
     dual_positions = [i for i, w in enumerate(board.words) if board.is_dual(w)]
 
     assert max(dual_positions) > BOARD_SIZE - len(board.dual_words)
@@ -121,3 +128,19 @@ def test_board_words_roles_and_dual_words_are_genuinely_immutable():
     assert isinstance(board.dual_words, frozenset)
     with pytest.raises(TypeError):
         board.roles["reg0"] = "target"
+
+
+def test_retired_styles_still_generate_the_boards_past_runs_recorded():
+    # M2 and M3 ran `dual_80`. It is out of the design, but their boards have to
+    # stay reproducible from (style, seed) or those results can't be re-analysed.
+    assert "dual_80" not in BOARD_STYLES
+    for style, share in RETIRED_BOARD_STYLES.items():
+        board = generate_board(_regular(), _dual(), seed=1, style=style)
+
+        assert len(board.dual_words) == share * BOARD_SIZE
+        assert len(board.words) == BOARD_SIZE
+
+
+def test_every_style_the_loader_knows_can_be_generated():
+    for style in ALL_BOARD_STYLES:
+        assert generate_board(_regular(), _dual(), seed=1, style=style).style == style

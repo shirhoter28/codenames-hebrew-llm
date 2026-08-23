@@ -18,7 +18,7 @@
 # pays for the guesser axis and keeps this run the same size as the last one.
 # The axis still exists in the config schema; the 08-17 data stands.
 #
-# 4 codemasters x 4 guessers x 1 method x 4 styles x 5 boards x 1 trial
+# 4 codemasters x 4 guessers x 1 method x 3 styles x 5 boards x 1 trial
 #   = 320 games, ~8,500 OpenRouter calls.
 #
 # BUDGET (projected from the 08-17 run's own per-call measurements)
@@ -79,7 +79,6 @@ codemaster_prompt_methods:
 board_styles:
   - dual_0
   - dual_50
-  - dual_80
   - dual_100
 n_boards: 5
 n_trials: 1

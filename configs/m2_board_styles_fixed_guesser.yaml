@@ -22,7 +22,6 @@ guesser_model: meta-llama/llama-3.3-70b-instruct
 board_styles:
   - dual_0
   - dual_50
-  - dual_80
   - dual_100
 n_boards: 5
 n_trials: 1

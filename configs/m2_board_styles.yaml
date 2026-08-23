@@ -1,8 +1,9 @@
 # M2: ambiguity as a controlled variable, under SELF-PLAY.
 #
-# The four styles form a 0% / 50% / 80% / 100% ladder of ambiguous (dual-list)
+# The three styles form a 0% / 50% / 100% ladder of ambiguous (dual-list)
 # words per 25-word board, so any trend across them is attributable to lexical
-# ambiguity rather than to sampling noise.
+# ambiguity rather than to sampling noise. Evenly spaced, so the trend can be
+# tested as linear vs curved.
 #
 # `guesser_model: same_as_codemaster` means each model guesses its own clues.
 # This removes the home-field advantage a single fixed guesser hands to the
@@ -12,8 +13,8 @@
 # isolates Codemaster skill; the gap between the two runs is itself a finding.
 #
 # Scale note: this config runs the full model x method matrix against every
-# style, so it costs 4x a single-style run. A completed game averages ~20
-# OpenRouter calls, so the numbers below are already ~3,200 calls. Validate the
+# style, so it costs 3x a single-style run. A completed game averages ~20
+# OpenRouter calls, so the numbers below are already ~2,400 calls. Validate the
 # ladder at this scale before raising n_boards / n_trials.
 models:
   - meta-llama/llama-3.3-70b-instruct
@@ -27,7 +28,6 @@ guesser_model: same_as_codemaster
 board_styles:
   - dual_0
   - dual_50
-  - dual_80
   - dual_100
 n_boards: 5
 n_trials: 1

@@ -20,13 +20,24 @@ ROLE_TAGS: dict[str, str] = {
 
 # Fraction of a board's 25 words drawn from the dual (ambiguous) pool. These are
 # the levels of the experiment's independent variable: how much Hebrew lexical
-# ambiguity a Codemaster has to work with.
+# ambiguity a Codemaster has to work with. Three evenly spaced levels, so the
+# dose-response curve can be tested for both a linear and a quadratic trend.
 BOARD_STYLES: dict[str, float] = {
     "dual_0": 0.0,
     "dual_50": 0.5,
-    "dual_80": 0.8,
     "dual_100": 1.0,
 }
+
+# Styles no longer in the design but still readable. M2 and M3 ran `dual_80`;
+# dropping it outright would make those boards ungeneratable and would silently
+# drop their rows from `style_order`, so reports on them would quietly lose a
+# quarter of the data. Retired styles can be regenerated and analysed, not
+# designed into a new run.
+RETIRED_BOARD_STYLES: dict[str, float] = {
+    "dual_80": 0.8,
+}
+
+ALL_BOARD_STYLES: dict[str, float] = {**BOARD_STYLES, **RETIRED_BOARD_STYLES}
 
 
 @dataclass(frozen=True)
@@ -59,7 +70,7 @@ def dual_count(style: str, seed: int) -> int:
     keeps the mean at exactly 50% across a set of boards, instead of biasing
     every single board low (or high).
     """
-    exact = BOARD_STYLES[style] * BOARD_SIZE
+    exact = ALL_BOARD_STYLES[style] * BOARD_SIZE
     base = int(exact)
     return base + (1 if exact != base and seed % 2 else 0)
 
@@ -70,9 +81,9 @@ def generate_board(
     seed: int,
     style: str,
 ) -> Board:
-    if style not in BOARD_STYLES:
+    if style not in ALL_BOARD_STYLES:
         raise ValueError(
-            f"unknown board style {style!r}; valid options are {sorted(BOARD_STYLES)}"
+            f"unknown board style {style!r}; valid options are {sorted(ALL_BOARD_STYLES)}"
         )
 
     n_dual = dual_count(style, seed)

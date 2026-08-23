@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from codenames_heb.board import Board, generate_board
+from codenames_heb.board import Board, dual_count, generate_board
 from codenames_heb.experiment import (
     SAME_AS_CODEMASTER,
     ExperimentConfig,
@@ -572,7 +572,7 @@ def test_run_experiment_reuses_same_boards_across_models(tmp_path):
 
 def test_run_experiment_generates_n_boards_for_every_style(tmp_path):
     config = _tiny_config(
-        board_styles=["dual_0", "dual_80", "dual_100"], n_boards=2, n_trials=1
+        board_styles=["dual_0", "dual_50", "dual_100"], n_boards=2, n_trials=1
     )
     make_codemaster, make_guesser = _stub_factories()
 
@@ -588,14 +588,15 @@ def test_run_experiment_generates_n_boards_for_every_style(tmp_path):
     boards = json.loads((run_dir / "boards.json").read_text(encoding="utf-8"))
     assert [(b["style"], b["seed"]) for b in boards] == [
         ("dual_0", 0), ("dual_0", 1),
-        ("dual_80", 0), ("dual_80", 1),
+        ("dual_50", 0), ("dual_50", 1),
         ("dual_100", 0), ("dual_100", 1),
     ]
     # The style label has to match the board's actual composition, or the
     # independent variable is mislabelled in every downstream analysis.
-    expected_dual = {"dual_0": 0, "dual_80": 20, "dual_100": 25}
     for entry in boards:
-        assert sum(entry["is_dual"].values()) == expected_dual[entry["style"]]
+        assert sum(entry["is_dual"].values()) == dual_count(
+            entry["style"], entry["seed"]
+        )
 
 
 def test_run_experiment_tags_every_result_row_with_its_board_style(tmp_path):
@@ -755,15 +756,26 @@ def test_load_config_rejects_non_list_board_styles(tmp_path):
         load_config(path)
 
 
-def test_load_config_accepts_all_four_board_styles(tmp_path):
+def test_load_config_accepts_the_whole_ambiguity_ladder(tmp_path):
     path = _write_config(
         tmp_path,
-        _VALID_CONFIG_TEXT.replace("[dual_50]", "[dual_0, dual_50, dual_80, dual_100]"),
+        _VALID_CONFIG_TEXT.replace("[dual_50]", "[dual_0, dual_50, dual_100]"),
     )
 
     config = load_config(path)
 
-    assert config.board_styles == ["dual_0", "dual_50", "dual_80", "dual_100"]
+    assert config.board_styles == ["dual_0", "dual_50", "dual_100"]
+
+
+def test_load_config_rejects_a_retired_board_style_and_says_it_is_retired(tmp_path):
+    # A retired style still generates boards (so past runs re-analyse), which
+    # would make it silently designable into a new run if load_config let it by.
+    path = _write_config(
+        tmp_path, _VALID_CONFIG_TEXT.replace("[dual_50]", "[dual_50, dual_80]")
+    )
+
+    with pytest.raises(ValueError, match=r"\['dual_80'\] are retired"):
+        load_config(path)
 
 
 def test_load_config_accepts_the_real_m2_config():
@@ -771,7 +783,7 @@ def test_load_config_accepts_the_real_m2_config():
         Path(__file__).resolve().parents[1] / "configs" / "m2_board_styles.yaml"
     )
 
-    assert config.board_styles == ["dual_0", "dual_50", "dual_80", "dual_100"]
+    assert config.board_styles == ["dual_0", "dual_50", "dual_100"]
 
 
 def test_load_config_accepts_the_real_pilot_config():
