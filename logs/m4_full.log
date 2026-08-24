@@ -1665,3 +1665,8 @@
 [ 1665/8640] meta-llama/llama-3.3-70b-instruct vs meta-llama/llama-3.3-70b-instruct natural translate_pipeline -> loss
 [ 1666/8640] openai/gpt-4o-mini vs openai/gpt-4o-mini natural translate_pipeline -> win
 [ 1667/8640] google/gemini-2.5-flash vs google/gemini-2.5-flash natural translate_pipeline -> loss
+Resuming results/20260823T191234131145Z: 1080 games already recorded, 7560 to play
+[ 1081/8640] qwen/qwen3.5-9b vs qwen/qwen3.5-9b dual_0 translate_pipeline -> loss
+[ 1082/8640] google/gemini-2.5-flash vs google/gemini-2.5-flash dual_0 translate_pipeline -> win
+[ 1083/8640] openai/gpt-4o-mini vs openai/gpt-4o-mini dual_0 translate_pipeline -> win
+[ 1084/8640] google/gemini-2.5-flash vs google/gemini-2.5-flash dual_0 translate_pipeline -> win

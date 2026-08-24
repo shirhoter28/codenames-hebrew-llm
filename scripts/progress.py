@@ -59,20 +59,38 @@ def status(run_dir: Path, refresh_report: bool = False) -> str:
     workers = meta.get("max_workers", 1)
 
     # Throughput from wall-clock span, not summed durations: games overlap.
-    starts = [datetime.fromisoformat(r["started_at"]) for r in rows if r.get("started_at")]
-    span_h = eta = None
-    if starts:
-        # A finished run's span ends at its last game, not at now — otherwise
-        # every report on an old run reads as though it is still running.
-        ends = [
-            datetime.fromisoformat(r["started_at"]) + timedelta(seconds=r.get("duration_s") or 0)
+    # Throughput comes from a TRAILING WINDOW, not from the whole run. A resumed
+    # run's earliest game may be days old and separated by an idle gap, so
+    # measuring from it understates the rate and inflates the ETA for the rest
+    # of the run — which is exactly when the ETA is being relied on.
+    # A "leg" is a stretch of continuous work. A resumed run has several,
+    # separated by however long it sat idle; averaging across the gap is what
+    # produced a 434-hour ETA on a run doing 120 games/h.
+    GAP_MINUTES = 15
+    timed = sorted(
+        (
+            (
+                datetime.fromisoformat(r["started_at"]),
+                datetime.fromisoformat(r["started_at"])
+                + timedelta(seconds=r.get("duration_s") or 0),
+            )
             for r in rows if r.get("started_at")
-        ]
-        finish = datetime.now(timezone.utc) if done < total else max(ends)
-        span_h = (finish - min(starts)).total_seconds() / 3600
+        ),
+        key=lambda pair: pair[0],
+    )
+    span_h = eta = None
+    if timed:
+        leg_start = 0
+        for i in range(1, len(timed)):
+            if (timed[i][0] - timed[i - 1][1]).total_seconds() > GAP_MINUTES * 60:
+                leg_start = i
+        recent = timed[leg_start:]
+        finish = datetime.now(timezone.utc) if done < total else max(e for _, e in recent)
+        span_h = (finish - min(s for s, _ in recent)).total_seconds() / 3600
+        total_elapsed_h = (finish - timed[0][0]).total_seconds() / 3600
         if span_h > 0 and done < total:
             eta = datetime.now(timezone.utc) + timedelta(
-                hours=(total - done) / (done / span_h)
+                hours=(total - done) / (len(recent) / span_h)
             )
 
     lines = [
@@ -80,9 +98,11 @@ def status(run_dir: Path, refresh_report: bool = False) -> str:
         f"at {workers} workers"
     ]
     if span_h:
-        rate = done / span_h
+        rate = len(recent) / span_h
+        provisional = " ~provisional" if len(recent) < 20 else ""
         lines.append(
-            f"  elapsed {span_h:.1f} h | {rate:.1f} games/h | "
+            f"  elapsed {total_elapsed_h:.1f} h | {rate:.1f} games/h "
+            f"(this leg: {len(recent)} games{provisional}) | "
             + (f"ETA {eta:%Y-%m-%d %H:%M} UTC ({(total-done)/rate:.1f} h left)"
                if eta else "complete")
         )
