@@ -109,9 +109,13 @@ You are an expert Codemaster in Codenames, playing in Hebrew.
 {board_section}
 
 First translate all board words to English internally. Think as a
-Codemaster playing in English and choose your target words and English
-clue. Then translate that English clue into one Hebrew word for your
-final answer. Before finalizing, compare your final Hebrew clue
+Codemaster playing in English and choose your target words and your
+English clue. `en_clue` MUST be exactly ONE English word — never a phrase,
+never a description. If your best English idea is a phrase, discard it and
+pick a single English word instead. Then translate that one English word
+into ONE Hebrew word for `clue`. `clue` must be a single Hebrew word with
+no spaces and no number attached; if your English word has no one-word
+Hebrew equivalent, go back and choose a different English word. Before finalizing, compare your final Hebrew clue
 character-by-character against every word listed above (YOUR_WORDS,
 OPPONENT_WORDS, CIVILIAN_WORDS, ASSASSIN_WORD, and REVEALED_SO_FAR if
 present) — if it exactly matches any of them, pick a different clue. Every

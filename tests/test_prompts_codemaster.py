@@ -323,3 +323,35 @@ def test_translate_pipeline_still_parses_by_key_not_position():
 
     assert result.clue == "אור"
     assert result.en_clue == "light"
+
+
+# --- the English clue must be one word, or the Hebrew one cannot be ---------
+#
+# Reordering the JSON so the translation precedes the clue made the pipeline
+# genuinely derive the Hebrew clue from the English one. The prompt required
+# only the *Hebrew* clue to be a single word, so multi-word English clues
+# ("things you find inside a house") propagated into illegal Hebrew clues:
+# 17.2% of en_clue values were phrases, against a 15.9% rejection rate.
+# Measured on qwen, worst affected: 9/17 illegal clues before, 0/19 after.
+
+
+def test_translate_pipeline_requires_a_single_word_english_clue():
+    system, _ = build_translate_pipeline_prompt(_board())
+
+    assert "en_clue" in system
+    assert "ONE English word" in system
+    assert "never a phrase" in system
+
+
+def test_translate_pipeline_tells_the_model_to_re_pick_when_no_one_word_hebrew_exists():
+    # Normalised: the template hard-wraps, so the phrase spans a newline.
+    system, _ = build_translate_pipeline_prompt(_board())
+
+    assert "no one-word Hebrew equivalent" in " ".join(system.split())
+
+
+def test_strong_hebrew_is_untouched_by_the_english_clue_rule():
+    # It never produces an en_clue; the rule would be noise in its prompt.
+    system, _ = build_strong_hebrew_prompt(_board())
+
+    assert "en_clue" not in system
