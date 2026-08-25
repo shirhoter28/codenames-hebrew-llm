@@ -15,7 +15,7 @@ rests on 5 games. At this scale the figures show direction;
 
 from __future__ import annotations
 
-from typing import Callable, Sequence
+from typing import Callable, Iterable, Sequence
 
 import matplotlib
 
@@ -86,19 +86,23 @@ def _colors_for(models: Sequence) -> dict:
     return {m: _MODEL_COLORS[i % len(_MODEL_COLORS)] for i, m in enumerate(models)}
 
 
-def annotate_n(ax, positions, counts, *, y, fontsize: int = 7):
+def annotate_n(ax, positions, counts, *, y, fontsize: int = 7, color: str = "#555555"):
     """Print the n behind each bar/box, next to that bar.
 
     The facet as a whole is not the unit anyone reads off these charts — a bar
     is. Labelling the panel instead of the bar overstates the evidence behind
     each column by the number of bars in it.
+
+    `color` exists for the figures that stack several n rows under one panel:
+    three grey rows of numbers say nothing about which row belongs to which
+    line, so there the row takes its line's colour.
     """
     for x, n in zip(positions, counts):
         if n is None or (isinstance(n, float) and pd.isna(n)):
             continue
         ax.annotate(
             f"{int(n)}", (x, y), ha="center", va="bottom",
-            fontsize=fontsize, color="#555555", clip_on=False,
+            fontsize=fontsize, color=color, clip_on=False,
         )
 
 
@@ -161,13 +165,22 @@ def facet_by_style(
     return fig
 
 
-def _grouped_bars(ax, categories, series, colors, errors=None, hatches=None):
-    """Bars grouped by `categories`, one bar per entry in `series`."""
+def _grouped_bars(ax, categories, series, colors, errors=None, hatches=None) -> dict:
+    """Bars grouped by `categories`, one bar per entry in `series`.
+
+    Returns {series name: x positions}. Where the n behind each bar differs
+    within a group — one model may have played fewer games under one clue-count
+    floor than another — the caller needs the bar's own x to label it, and
+    recomputing this offset arithmetic at the call site would let the two
+    drift apart.
+    """
     n = len(series)
     width = 0.8 / max(n, 1)
     positions = range(len(categories))
+    placed = {}
     for i, (name, values) in enumerate(series.items()):
         offsets = [p - 0.4 + width * (i + 0.5) for p in positions]
+        placed[name] = offsets
         ax.bar(
             offsets,
             values,
@@ -184,6 +197,7 @@ def _grouped_bars(ax, categories, series, colors, errors=None, hatches=None):
     ax.set_xticklabels([short_model(c) for c in categories])
     ax.grid(axis="y", alpha=0.25, linewidth=0.5)
     ax.set_axisbelow(True)
+    return placed
 
 
 def _legend(labels_colors, hatch=None):
@@ -762,6 +776,272 @@ def fig_pair_matrix(games: pd.DataFrame):
     return fig
 
 
+# The floors are a designed ladder, so they get a ramp rather than the
+# categorical model palette: free is neutral, and the numeric floors darken as
+# they tighten.
+_FREE_COLOR = "#90a4ae"
+_FLOOR_RAMP = ("#4db6ac", "#00897b", "#00695c", "#004d40")
+
+# A point on the clue-count-by-round figure needs this many rounds behind it to
+# be drawn. Late rounds only exist in the games that ran long, so without a
+# floor every panel ends on a tail traced by one or two games.
+MIN_ROUNDS_PER_POINT = 5
+
+
+def count_floor_order(values: Iterable) -> list:
+    """`free` first, then the numeric floors in numeric order.
+
+    Plain `sorted()` is string order, which puts `min10` between `free` and
+    `min2` and draws the ladder out of sequence. Unrecognised labels sort last
+    rather than raising, so an older run with a hand-edited arm still plots.
+    """
+    def key(label):
+        text = str(label)
+        if text == "free":
+            return (0, 0, "")
+        if text.startswith("min") and text[3:].isdigit():
+            return (1, int(text[3:]), "")
+        return (2, 0, text)
+
+    return sorted({str(v) for v in values}, key=key)
+
+
+def _floor_levels(df: pd.DataFrame) -> list:
+    """The clue-count floors this frame can actually contrast."""
+    if "count_constraint" not in df.columns:
+        return []
+    return count_floor_order(df["count_constraint"].dropna().unique())
+
+
+def _floor_colors(floors: Sequence) -> dict:
+    numeric = [f for f in floors if f != "free"]
+    colors = {"free": _FREE_COLOR}
+    for i, floor in enumerate(numeric):
+        colors[floor] = _FLOOR_RAMP[i % len(_FLOOR_RAMP)]
+    return colors
+
+
+# --- 11. win rate by clue-count floor ------------------------------------
+
+
+def fig_win_rate_by_count_floor(games: pd.DataFrame):
+    """Does forcing a bigger clue win more games?
+
+    The floor is the x-axis rather than a facet, because it is an *assigned*
+    treatment and the ladder is meant to be read left to right. Every floor
+    plays the same boards with the same models, so board luck cancels across
+    the ladder in a way it never does across board style.
+
+    Intervals are Wilson, not Wald: a cell that went 4-for-4 has a Wald SE of
+    exactly 0, which draws as certainty.
+    """
+    completed = games[games["completed"]]
+    floors = _floor_levels(completed)
+    if len(floors) < 2 or completed.empty:
+        return None
+
+    models = _model_order(completed)
+    colors = _colors_for(models)
+
+    def draw(ax, subset):
+        stats = summarize(
+            subset, ["count_constraint", "model"], ["is_win"], proportions=["is_win"]
+        ).set_index(["count_constraint", "model"])
+        series, errors, counts = {}, {}, {}
+        for model in models:
+            rows = stats.reindex([(floor, model) for floor in floors])
+            mean = rows["is_win_mean"].fillna(0.0)
+            label = short_model(model)
+            series[label] = mean.to_numpy()
+            errors[label] = [
+                (mean - rows["is_win_lo"].fillna(mean)).clip(lower=0).to_numpy(),
+                (rows["is_win_hi"].fillna(mean) - mean).clip(lower=0).to_numpy(),
+            ]
+            counts[label] = rows["n"].fillna(0).to_numpy()
+
+        placed = _grouped_bars(ax, floors, series, {short_model(m): colors[m] for m in models},
+                               errors=errors)
+        for label, xs in placed.items():
+            annotate_n(ax, xs, counts[label], y=1.02, fontsize=6.5)
+        ax.set_ylim(0, 1.14)
+
+    return facet_by_style(
+        completed,
+        draw,
+        title="Win rate by clue-count floor (Wilson 95% bars) — completed games only",
+        ylabel="win rate",
+        subtitle="number above each bar = completed games behind that bar",
+        legend_handles=_legend({short_model(m): colors[m] for m in models}),
+    )
+
+
+# --- 12. game length by clue-count floor ---------------------------------
+
+
+def fig_game_length_by_count_floor(games: pd.DataFrame):
+    """How long a game runs under each floor, split by outcome.
+
+    Split rather than pooled for the same reason as `fig_game_length`: a game
+    ends either when all nine targets are found or when the assassin is hit, so
+    a floor that shortens the average could be winning faster *or* dying
+    sooner, and one pooled box cannot tell those apart.
+
+    Models are pooled so a panel stays at six boxes; the per-model split is in
+    the `["model", "count_constraint"]` table, where it is not competing for
+    horizontal room.
+    """
+    completed = games[games["completed"]]
+    floors = _floor_levels(completed)
+    if len(floors) < 2 or completed.empty:
+        return None
+
+    top = completed["game_length"].max()
+
+    def draw(ax, subset):
+        positions, counts = [], []
+        for xi, floor in enumerate(floors):
+            arm = subset[subset["count_constraint"] == floor]
+            for oi, outcome in enumerate(("win", "loss")):
+                values = arm[arm["outcome"] == outcome]["game_length"].dropna()
+                position = xi - 0.18 + 0.36 * oi
+                positions.append(position)
+                counts.append(len(values))
+                if values.empty:
+                    continue
+                box = ax.boxplot(
+                    values, positions=[position], widths=0.3, patch_artist=True,
+                    medianprops={"color": "black", "linewidth": 1.2},
+                    flierprops={"markersize": 3, "alpha": 0.5},
+                )
+                for patch in box["boxes"]:
+                    patch.set_facecolor(_OUTCOME_COLORS[outcome])
+                    patch.set_alpha(0.65)
+        ax.set_xticks(range(len(floors)))
+        ax.set_xticklabels(floors)
+        ax.set_xlim(-0.6, len(floors) - 0.4)
+        ax.set_ylim(0, top * 1.16)
+        # Wins and losses split each floor unevenly, so every box needs its own n.
+        annotate_n(ax, positions, counts, y=top * 1.04)
+
+    return facet_by_style(
+        completed,
+        draw,
+        title="Game length (rounds) by clue-count floor and outcome — completed games only",
+        ylabel="rounds",
+        subtitle="models pooled; number above each box = games in that box",
+        legend_handles=_legend({k: v for k, v in _OUTCOME_COLORS.items() if k != "failed"}),
+    )
+
+
+# --- 13. clue count over the course of a game ----------------------------
+
+
+def fig_count_by_round(rounds: pd.DataFrame):
+    """Clue ambition against turn number, one line per floor, one panel per
+    codemaster.
+
+    The question the floors were introduced to answer is whether they keep
+    biting. The dashed companion line is the mean `required_count` — the floor
+    actually in force after it is capped to the targets still hidden — so a
+    solid line tracking its own dashed line means the model is being held at
+    the floor, and the dashed line falling away late is the endgame cap, not
+    the model losing nerve.
+
+    Board style is collapsed here. Every style plays every floor, so the
+    contrast this figure draws survives the pooling; keeping style as a facet
+    as well would put twelve panels on one row.
+    """
+    floors = _floor_levels(rounds)
+    if len(floors) < 2 or rounds.empty:
+        return None
+
+    models = _model_order(rounds)
+    colors = _floor_colors(floors)
+    stats = summarize(
+        rounds, ["model", "count_constraint", "round"], ["count", "required_count"]
+    )
+    stats = stats[stats["count_n"] >= MIN_ROUNDS_PER_POINT]
+    if stats.empty:
+        return None
+
+    se = stats["count_se"].fillna(0)
+    top = float((stats["count_mean"] + se).max()) * 1.15
+
+    # One tick ladder for every panel. Panels are read against each other, and
+    # left to itself matplotlib ticks a 14-round panel every 2 rounds, a
+    # 19-round one every 2.5 and a 20-round one every 5 — so the same
+    # horizontal distance would mean a different number of rounds in each.
+    last_round = int(stats["round"].max())
+    step = next(s for s in (1, 2, 5, 10, 20, 50, 100) if last_round / s <= 10)
+    ticks = list(range(step, last_round + 1, step))
+    # A band below the axis for the per-point n, one row per floor — the same
+    # idea as the numbers-at-risk table under a survival curve. Stacking the
+    # rows inside the panel would put them through the lines.
+    band = top * 0.09 * (len(floors) + 0.6)
+
+    fig, axes = plt.subplots(
+        1, max(len(models), 1),
+        figsize=(FACET_WIDTH * max(len(models), 1) * 1.05, FACET_HEIGHT * 1.15),
+        sharey=True, sharex=True, squeeze=False,
+    )
+    for ax, model in zip(axes[0], models):
+        for fi, floor in enumerate(floors):
+            line = stats[
+                (stats["model"] == model) & (stats["count_constraint"] == floor)
+            ].sort_values("round")
+            if line.empty:
+                continue
+            xs = line["round"].to_numpy()
+            mean = line["count_mean"].to_numpy()
+            spread = line["count_se"].fillna(0).to_numpy()
+            ax.plot(xs, mean, marker="o", linestyle="-", linewidth=1.7,
+                    markersize=4.5, color=colors[floor], label=floor)
+            ax.fill_between(xs, mean - spread, mean + spread,
+                            color=colors[floor], alpha=0.15, linewidth=0)
+            if "required_count_mean" in line.columns:
+                floor_line = line.dropna(subset=["required_count_mean"])
+                if not floor_line.empty:
+                    ax.plot(floor_line["round"].to_numpy(),
+                            floor_line["required_count_mean"].to_numpy(),
+                            linestyle="--", linewidth=1.2, color=colors[floor])
+            # Only at the ticks: a 20-round panel a few inches wide cannot fit
+            # twenty three-digit labels in a row, and printing them all turns
+            # the row into an unreadable smear.
+            shown = line[line["round"].isin(ticks)]
+            annotate_n(ax, shown["round"].to_numpy(), shown["count_n"].to_numpy(),
+                       y=-top * 0.09 * (fi + 1.1), fontsize=6.5, color=colors[floor])
+
+        ax.set_title(short_model(model), fontsize=10)
+        ax.set_ylim(-band, top)
+        ax.set_yticks([t for t in ax.get_yticks() if t >= 0])
+        ax.set_xticks(ticks)
+        ax.set_xlim(0.3, last_round + 0.7)
+        ax.hlines(0, *ax.get_xlim(), color="#bdbdbd", linewidth=0.8)
+        ax.grid(axis="y", alpha=0.25, linewidth=0.5)
+        ax.set_axisbelow(True)
+        ax.set_xlabel("round", fontsize=9)
+
+    axes[0][0].set_ylabel("clue count (ambition)")
+    fig.suptitle(
+        "Clue ambition by turn number and clue-count floor (SE band)",
+        fontsize=12, y=1.10,
+    )
+    fig.text(
+        0.5, 1.025,
+        "dashed = the floor actually in force after the endgame cap; numbers "
+        f"under each panel = rounds behind the ticked points (points below "
+        f"{MIN_ROUNDS_PER_POINT} rounds dropped)",
+        ha="center", fontsize=8.5, color="#555555",
+    )
+    fig.legend(
+        handles=_legend({floor: colors[floor] for floor in floors}),
+        loc="upper center", bbox_to_anchor=(0.5, -0.02),
+        ncol=min(len(floors), 4), frameon=False, fontsize=9,
+    )
+    fig.tight_layout()
+    return fig
+
+
 FIGURES = {
     "01_outcome_composition": lambda data: fig_outcome_composition(data.games),
     "02_game_length": lambda data: fig_game_length(data.games),
@@ -775,6 +1055,9 @@ FIGURES = {
     "08_first_guess_lift": lambda data: fig_first_guess_lift(data.games),
     "09_win_length_ladder": lambda data: fig_win_length_ladder(data.games),
     "10_pair_matrix": lambda data: fig_pair_matrix(data.games),
+    "11_win_rate_by_count_floor": lambda data: fig_win_rate_by_count_floor(data.games),
+    "12_game_length_by_count_floor": lambda data: fig_game_length_by_count_floor(data.games),
+    "13_count_by_round": lambda data: fig_count_by_round(data.rounds),
 }
 
 
