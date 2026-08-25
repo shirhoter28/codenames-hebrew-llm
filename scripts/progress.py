@@ -131,15 +131,23 @@ def status(run_dir: Path, refresh_report: bool = False) -> str:
 
     # Per-model call latency: a model slowing down with flat rejections means
     # the provider is throttling, which otherwise reads as non-compliance.
+    #
+    # Scoped to the current leg AND split by prompt method. Cumulative,
+    # method-pooled latency drifts as the method mix changes — translate_pipeline
+    # runs ~7.6 s/call against strong_hebrew's ~4.2 — so a run moving from one
+    # to the other looks exactly like a throttle. Splitting removes that.
+    leg_rows = rows[-len(recent):] if timed else rows
     per = defaultdict(lambda: [0.0, 0])
-    for r in rows:
-        p = per[r["model"]]
-        p[0] += r.get("duration_s") or 0
-        p[1] += (r.get("codemaster_attempts") or 0) + (r.get("guesser_attempts") or 0)
-    lines.append("  s/call by codemaster: " + "  ".join(
-        f"{m.split('/')[-1]}={(d/c if c else float('nan')):.1f}"
-        for m, (d, c) in sorted(per.items())
-    ))
+    for r in leg_rows:
+        key = (r.get("method"), r["model"])
+        per[key][0] += r.get("duration_s") or 0
+        per[key][1] += (r.get("codemaster_attempts") or 0) + (r.get("guesser_attempts") or 0)
+    for method in sorted({k[0] for k in per}):
+        cells = "  ".join(
+            f"{m.split('/')[-1]}={(d/c if c else float('nan')):.1f}"
+            for (mt, m), (d, c) in sorted(per.items()) if mt == method
+        )
+        lines.append(f"  s/call [{method}]: {cells}")
 
     if refresh_report and done >= 3:
         result = subprocess.run(
