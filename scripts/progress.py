@@ -44,11 +44,19 @@ def _expected_games(config: dict) -> int:
 
 
 def status(run_dir: Path, refresh_report: bool = False) -> str:
-    rows = [
-        json.loads(line)
-        for line in (run_dir / "raw.jsonl").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    # Tolerant of a partial trailing line: the runner appends to this file
+    # continuously, so a read can catch a row mid-write. Crashing there would
+    # silence the whole report, and a silent monitor looks like a healthy one.
+    # Mirrors `experiment._read_raw_rows`.
+    rows = []
+    for line in (run_dir / "raw.jsonl").read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
     if not rows:
         return f"[{run_dir.name}] no games recorded yet"
 
@@ -148,6 +156,20 @@ def status(run_dir: Path, refresh_report: bool = False) -> str:
             for (mt, m), (d, c) in sorted(per.items()) if mt == method
         )
         lines.append(f"  s/call [{method}]: {cells}")
+
+    # Guard the defect that stopped this run once already: translate_pipeline
+    # emitting multi-word Hebrew clues (15.9% pre-fix, 0.6% on the 08-17 run).
+    tp = [r for r in rows if r.get("method") == "translate_pipeline"]
+    if tp:
+        att = sum(r.get("codemaster_attempts") or 0 for r in tp)
+        mw = sum((r.get("rejection_reasons") or {}).get("clue_not_single_word", 0)
+                 for r in tp)
+        rate = mw / att if att else 0.0
+        lines.append(
+            f"  translate multi-word clue: {mw}/{att} = {rate:.1%}"
+            + ("  !! ABOVE 5% — the en_clue fix is not holding" if rate > 0.05
+               else "  (15.9% pre-fix, 0.6% on 08-17)")
+        )
 
     if refresh_report and done >= 3:
         result = subprocess.run(
