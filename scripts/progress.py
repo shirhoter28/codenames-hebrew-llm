@@ -11,6 +11,7 @@ Designed to be driven on an interval, e.g. under a watcher every 2 hours.
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from collections import Counter, defaultdict
@@ -18,6 +19,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+# Blended per-game cost, measured across the two prompt methods.
+COST_PER_GAME = 0.00428
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 import yaml  # noqa: E402
@@ -170,6 +173,34 @@ def status(run_dir: Path, refresh_report: bool = False) -> str:
             + ("  !! ABOVE 5% — the en_clue fix is not holding" if rate > 0.05
                else "  (15.9% pre-fix, 0.6% on 08-17)")
         )
+
+    # Remaining API budget against the cost of the games still to play. A key
+    # hitting its cap returns 403, which is correctly non-retryable, so the
+    # runner burns through every remaining task writing error rows in minutes.
+    # That happened on 2026-08-25 and cost 4,907 games. Seeing it coming is
+    # cheaper than restructuring the runner to abort on it.
+    remaining_cost = (total - done) * COST_PER_GAME
+    try:
+        import requests
+        from dotenv import load_dotenv
+
+        load_dotenv(PROJECT_ROOT / ".env")
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        info = requests.get(
+            "https://openrouter.ai/api/v1/key",
+            headers={"Authorization": f"Bearer {key}"}, timeout=20,
+        ).json().get("data", {})
+        left = info.get("limit_remaining")
+        if left is not None:
+            short = " !! WILL NOT FINISH — raise the key limit" if left < remaining_cost else ""
+            lines.append(
+                f"  budget: ${left:.2f} left, ~${remaining_cost:.2f} needed "
+                f"for {total - done:,} games{short}"
+            )
+        else:
+            lines.append(f"  budget: key has no limit set; ~${remaining_cost:.2f} needed")
+    except Exception as exc:  # never let a budget probe break the report
+        lines.append(f"  budget: could not check ({type(exc).__name__})")
 
     if refresh_report and done >= 3:
         result = subprocess.run(
