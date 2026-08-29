@@ -30,7 +30,11 @@ ARM = "min2"
 
 
 def comparable(data):
-    """Both runs reduced to the cells they have in common."""
+    """Both runs reduced to the cells they have in common.
+
+    Cleanest for comparing models to each other, because every model then
+    carries the same mix of arms and partners.
+    """
     keep = (
         data.games["model"].isin(MODELS)
         & data.games["guesser_model"].isin(MODELS)
@@ -47,9 +51,18 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("runs", nargs="+", type=Path)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument(
+        "--scope", choices=("comparable", "all"), default="comparable",
+        help="'comparable' cuts both runs to the cells they share; 'all' keeps "
+             "every game. 'all' is the fuller picture but the runs have "
+             "different designs, so a model's arm/partner mix differs between "
+             "them and model-to-model comparisons become confounded.",
+    )
     args = ap.parse_args(argv)
 
-    data = comparable(load_runs(args.runs))
+    data = load_runs(args.runs)
+    if args.scope == "comparable":
+        data = comparable(data)
     g = data.games
     if g.empty:
         print("no games in the comparable subset yet")
@@ -57,8 +70,13 @@ def main(argv=None) -> int:
 
     per_run = g.groupby("run_id").size().to_dict()
     boards = g.groupby("board_style")["board_seed"].nunique().to_dict()
-    print(f"pooled {len(g):,} games from {len(per_run)} run(s): {per_run}")
-    print(f"boards per style: {boards}")
+    print(f"scope={args.scope}: pooled {len(g):,} games from {len(per_run)} run(s): {per_run}")
+    print(f"boards per style: {boards}  (total {sum(boards.values())})")
+    if args.scope == "all":
+        mix = g.groupby(["model", "count_constraint"]).size().unstack(fill_value=0)
+        print("games per codemaster x arm — uneven rows mean model comparisons "
+              "are confounded by arm mix:")
+        print(mix.to_string())
     print(f"models: {sorted(g['model'].unique())}")
     print(f"methods: {sorted(g['method'].unique())}   arm: {sorted(g['count_constraint'].unique())}")
 

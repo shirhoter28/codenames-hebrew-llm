@@ -36,3 +36,8 @@
 [   36/2880] openai/gpt-4o-mini vs openai/gpt-4o-mini dual_0 strong_hebrew -> loss
 [   37/2880] google/gemini-2.5-flash vs google/gemini-2.5-flash dual_0 strong_hebrew -> loss
 [   38/2880] openai/gpt-4o-mini vs openai/gpt-4o-mini dual_0 strong_hebrew -> loss
+[   39/2880] google/gemini-2.5-flash vs google/gemini-2.5-flash dual_0 strong_hebrew -> win
+[   40/2880] google/gemini-2.5-flash vs google/gemini-2.5-flash dual_0 strong_hebrew -> loss
+[   41/2880] openai/gpt-4o-mini vs openai/gpt-4o-mini dual_0 strong_hebrew -> loss
+[   42/2880] openai/gpt-4o-mini vs openai/gpt-4o-mini dual_0 strong_hebrew -> loss
+[   43/2880] google/gemini-2.5-flash vs google/gemini-2.5-flash dual_0 strong_hebrew -> win
