@@ -1,0 +1,72 @@
+# M5 — AMBIGUITY TOP-UP. Boards, not games.
+#
+# M4 (results/20260823T191234131145Z) answered three of its four questions and
+# left the primary one at the edge: dual_0 - dual_100 = +0.0335 lift, z=1.72.
+# That was not a shortage of games. Board-style precision is capped by the
+# number of BOARDS, because the two arms sit on different boards and
+# board-to-board variance never cancels. At M4's 30 boards per style, even 200
+# games per board would only have reached z=1.49. This run buys boards.
+#
+# 2 codemasters x 2 guessers x 2 methods x min2 x 3 styles x 120 NEW boards
+#   = 24 cells x 120 = 2,880 games, ~$12.3.
+#
+# TIME: ~50 h, not the ~25 h a 4-worker run would take. `max_workers` is capped
+# at len(models) so concurrent games hit different providers, and this design
+# names only two models. Two workers is half the throughput of M4's four.
+#
+# `board_seed_offset: 30` -> seeds 30-149. M4 used 0-29, so there is ZERO
+# overlap and nothing is replayed; boards are deterministic from (style, seed),
+# so the two runs pool for every contrast.
+#
+# WHY THIS SHAPE
+#
+# - 2x2 not 4x4: qwen's ambiguity gap is +0.018 against gemini's +0.046. At 0.15
+#   lift overall it has no room left to fall, so it dilutes the contrast. gemini
+#   and gpt-4o-mini are the strongest pair in BOTH roles (guesser lift 0.407 and
+#   0.348; llama is a much weaker guesser at 0.279 despite tying gpt-4o-mini as
+#   a codemaster).
+# - 120 boards not 240: with only 100 dual words, 240 dual_100 boards would
+#   reuse each word ~60 times and stop being independent draws. At 120 it is
+#   ~30. The pool, not the budget, is what caps this.
+# - Both methods: translate_pipeline beat strong_hebrew by +0.080 lift (z=13.85)
+#   in M4, and its advantage was FLAT across ambiguity (+0.0765 / +0.0778 /
+#   +0.0862) with near-zero between-board variance (0.00009 vs 0.00606 for lift
+#   itself). That says the gain is general English competence, not ambiguity
+#   resolution. Keeping both methods tests that claim on boards that did not
+#   generate it, and lets ambiguity be reported per method rather than pooled.
+# - min2 not free: 32% of free-choice rounds are count 0-1, which is a
+#   degenerate game. min2 lifts mean ambition 1.88 -> 2.16, costs nothing in
+#   lift (z=0.02 vs free), and showed a larger ambiguity gap (+0.034 vs +0.024)
+#   — though treat that last point as partly winner's curse.
+#
+# POWER (pooling these boards with M4's 90)
+#
+#   effect 0.0335 (M4 all-conditions):  z 2.66, power 76%
+#   effect 0.042  (focused subset)   :  z 3.34, power 92%
+#
+# The headline figures assume pooling with all of M4. A strict like-for-like
+# analysis — same 2 models, same arm, on both old and new boards — drops the old
+# boards from 93 games each to 4 and gives z 1.91 / 2.39 instead. Report the
+# pooled result as headline and the strict one as a robustness check.
+#
+# The interaction "does translate protect MORE under ambiguity" is NOT reachable:
+# it is +0.0097 (z=0.71) and would need ~59,000 games, ~$252, ~520 h.
+models:
+  - google/gemini-2.5-flash
+  - openai/gpt-4o-mini
+guesser_models:
+  - google/gemini-2.5-flash
+  - openai/gpt-4o-mini
+codemaster_prompt_methods:
+  - strong_hebrew
+  - translate_pipeline
+count_constraints:
+  - 2
+board_styles:
+  - dual_0
+  - natural
+  - dual_100
+n_boards: 120
+board_seed_offset: 30
+n_trials: 1
+max_workers: 2
