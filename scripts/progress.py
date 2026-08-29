@@ -186,11 +186,25 @@ def status(run_dir: Path, refresh_report: bool = False) -> str:
 
         load_dotenv(PROJECT_ROOT / ".env")
         key = os.environ.get("OPENROUTER_API_KEY", "")
+        headers = {"Authorization": f"Bearer {key}"}
         info = requests.get(
-            "https://openrouter.ai/api/v1/key",
-            headers={"Authorization": f"Bearer {key}"}, timeout=20,
+            "https://openrouter.ai/api/v1/key", headers=headers, timeout=20,
         ).json().get("data", {})
-        left = info.get("limit_remaining")
+        # Two independent ceilings, and the run dies on whichever binds first:
+        # the KEY's own limit (403 "Key limit exceeded") and the ACCOUNT's credit
+        # balance (402 "Payment Required"). Checking only the key was why the
+        # 2026-08-29 stall at 92.7% gave no warning — the key still showed $4.80
+        # while the account had run dry. Report the smaller of the two.
+        limits = [v for v in [info.get("limit_remaining")] if v is not None]
+        try:
+            cred = requests.get(
+                "https://openrouter.ai/api/v1/credits", headers=headers, timeout=20,
+            ).json().get("data", {})
+            if cred.get("total_credits") is not None:
+                limits.append(cred["total_credits"] - cred.get("total_usage", 0))
+        except Exception:
+            pass
+        left = min(limits) if limits else None
         if left is not None:
             short = " !! WILL NOT FINISH — raise the key limit" if left < remaining_cost else ""
             lines.append(
