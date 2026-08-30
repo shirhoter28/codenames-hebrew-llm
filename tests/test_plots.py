@@ -49,6 +49,7 @@ def rounds(games):
                 {
                     "model": row.model, "method": row.method,
                     "board_style": row.board_style, "board_seed": row.board_seed,
+                    "count_constraint": "free", "clue": None, "intended_targets": None,
                     "trial": row.trial, "round": rnd + 1,
                     "count": 2, "n_correct": 1, "yield_ratio": 0.5,
                     "intended_recall": 0.5, "intended_precision": 1.0,
@@ -355,6 +356,7 @@ def floor_rounds(floor_games):
                     "guesser_model": row.guesser_model,
                     "board_style": row.board_style,
                     "count_constraint": floor,
+                    "clue": None, "intended_targets": None,
                     "board_seed": row.board_seed, "trial": row.trial,
                     "round": rnd,
                     "count": ambition[floor],
@@ -492,3 +494,82 @@ def test_count_by_round_ticks_every_panel_the_same_way(long_floor_rounds):
         for ax in fig.axes
     }
     assert len(steps) == 1
+
+
+@pytest.fixture
+def agreement_rounds():
+    """Round-1 draws over 2 styles x 2 floors x 2 codemasters x 2 methods.
+
+    Four guesser replicates per cell, which is what makes a cell a repeat draw
+    from one identical prompt. `v/alpha` always repeats its clue; `v/beta`
+    never does, but always aims at the same word — the case that separates
+    unstable phrasing from an unstable strategy.
+    """
+    records = []
+    for style in ("dual_0", "dual_100"):
+        for floor in ("free", "min2"):
+            for method in ("strong_hebrew", "translate_pipeline"):
+                for i in range(4):
+                    records.append({
+                        "board_style": style, "board_seed": 0,
+                        "model": "v/alpha", "guesser_model": f"g{i}",
+                        "method": method, "count_constraint": floor,
+                        "round": 1, "clue": "בית",
+                        "intended_targets": ["א", "ב"], "count": 2,
+                        "n_correct": 1, "stop_class": "stopped_at_quota",
+                        "first_miss_role": None,
+                    })
+                    records.append({
+                        "board_style": style, "board_seed": 0,
+                        "model": "v/beta", "guesser_model": f"g{i}",
+                        "method": method, "count_constraint": floor,
+                        "round": 1, "clue": f"קלו{i}",
+                        "intended_targets": ["א"], "count": 1,
+                        "n_correct": 1, "stop_class": "stopped_at_quota",
+                        "first_miss_role": None,
+                    })
+    return pd.DataFrame(records)
+
+
+def test_self_consistency_grid_has_a_panel_per_style_and_floor(agreement_rounds):
+    fig = plots.fig_self_consistency_grid(agreement_rounds, "count_constraint")
+
+    # 2 styles across x 2 floors down.
+    assert len(fig.axes) == 4
+    assert [ax.get_title() for ax in fig.axes[:2]] == ["dual_0", "dual_100"]
+
+
+def test_self_consistency_grid_separates_stable_from_unstable(agreement_rounds):
+    fig = plots.fig_self_consistency_grid(agreement_rounds, "count_constraint")
+
+    # alpha repeats its clue (unanimous 1.0), beta never does (0.0).
+    heights = sorted(round(p.get_height(), 3) for p in fig.axes[0].patches)
+    assert heights[0] == 0.0
+    assert heights[-1] == 1.0
+
+
+def test_self_consistency_grid_marks_target_set_agreement(agreement_rounds):
+    # beta's clue changes every draw but its aim never does. Without the
+    # self_jaccard marker the figure would call that pure instability.
+    fig = plots.fig_self_consistency_grid(agreement_rounds, "count_constraint")
+
+    markers = [line for line in fig.axes[0].get_lines()
+               if line.get_linestyle() == "None"]
+    assert markers
+    assert max(max(m.get_ydata()) for m in markers) == 1.0
+
+
+def test_cross_model_agreement_grid_builds(agreement_rounds):
+    fig = plots.fig_cross_model_agreement_grid(agreement_rounds, "count_constraint")
+
+    assert fig is not None
+    assert len(fig.axes) == 4
+
+
+def test_agreement_grids_are_skipped_when_the_row_factor_has_one_level(agreement_rounds):
+    # facet_grid's contract: a one-row "grid" promises a contrast the run
+    # cannot make.
+    single = agreement_rounds[agreement_rounds["count_constraint"] == "free"]
+
+    assert plots.fig_self_consistency_grid(single, "count_constraint") is None
+    assert plots.fig_cross_model_agreement_grid(single, "count_constraint") is None

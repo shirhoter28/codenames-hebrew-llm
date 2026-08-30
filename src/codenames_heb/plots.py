@@ -29,6 +29,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
 
+from codenames_heb import agreement as _agreement  # noqa: E402
 from codenames_heb.analysis import (  # noqa: E402
     style_order,
     summarize,
@@ -987,6 +988,168 @@ def fig_count_by_round(rounds: pd.DataFrame):
     return fig
 
 
+# --- 12-13. round-1 agreement -------------------------------------------
+
+# The self_jaccard marker rides on top of the unanimity bar, so it needs to
+# read against every model colour rather than belong to one.
+_JACCARD_MARKER = "#212121"
+
+
+def _paint_self_consistency(ax, subset, *, models, methods, colors):
+    """Unanimity as the bar, target-set agreement as the marker above it.
+
+    Both are needed. The bar answers "did it give the same clue"; the marker
+    answers "did it aim at the same words". A low bar under a high marker is a
+    model rewording one stable idea, which is a different failure from a model
+    that cannot decide what to point at.
+    """
+    width = 0.8 / len(methods)
+    stats = (
+        None if subset.empty
+        else summarize(
+            subset, ["model", "method"], ["is_unanimous", "self_jaccard"],
+            proportions=["is_unanimous"],
+        ).set_index(["model", "method"])
+    )
+
+    for mi, method in enumerate(methods):
+        offsets = [xi - 0.4 + width * (mi + 0.5) for xi in range(len(models))]
+        if stats is None:
+            rows = pd.DataFrame(
+                index=range(len(models)),
+                columns=["n", "is_unanimous_mean", "self_jaccard_mean"],
+                dtype="float64",
+            )
+        else:
+            rows = stats.reindex([(model, method) for model in models])
+        ax.bar(
+            offsets,
+            rows["is_unanimous_mean"].astype("float64").fillna(0.0).to_numpy(),
+            width=width * 0.92,
+            color=[colors[model] for model in models],
+            hatch=_METHOD_HATCH.get(method, ""),
+            edgecolor="white",
+            linewidth=0.4,
+        )
+        ax.plot(
+            offsets,
+            rows["self_jaccard_mean"].astype("float64").to_numpy(),
+            linestyle="None", marker="D", markersize=4,
+            color=_JACCARD_MARKER,
+        )
+        annotate_n(ax, offsets, rows["n"].fillna(0).to_numpy(), y=1.02, fontsize=6.5)
+
+    ax.set_xticks(range(len(models)))
+    ax.set_xticklabels([short_model(m) for m in models])
+    ax.set_xlim(-0.6, len(models) - 0.4)
+    ax.set_ylim(0, 1.14)
+    ax.grid(axis="y", alpha=0.25, linewidth=0.5)
+    ax.set_axisbelow(True)
+
+
+def fig_self_consistency_grid(rounds: pd.DataFrame, row_col: str):
+    """Does a codemaster reproduce its own round-1 clue from an identical prompt?
+
+    Round 1 is the only controlled point in the run: `revealed` is empty, so the
+    prompt is fixed by (board, model, method, floor) and the guesser cannot have
+    influenced it. The four guesser-runs of a cell are four draws from one
+    byte-identical prompt.
+    """
+    cells = _agreement.self_consistency(rounds)
+    if cells.empty:
+        return None
+    models, methods = _model_order(cells), _method_order(cells)
+    colors = _colors_for(models)
+    label = _ROW_LABELS.get(row_col, row_col)
+    return facet_grid(
+        cells,
+        _paint_self_consistency,
+        row_col=row_col,
+        models=models,
+        methods=methods,
+        colors=colors,
+        title=f"Round-1 self-consistency by codemaster, board style and {label}",
+        ylabel="share / Jaccard",
+        subtitle="bar = share of cells giving one clue every time; diamond = mean "
+                 "target-set Jaccard; hatched = translate_pipeline; number above "
+                 "each bar = replicate cells behind it",
+        legend_handles=(
+            _legend({short_model(m): colors[m] for m in models})
+            + _method_legend(methods)
+        ),
+        panel_width=FACET_WIDTH * 1.05,
+    )
+
+
+_AGREEMENT_METRICS = {
+    "clue agreement": ("pairwise_clue_agreement", "#00695c"),
+    "target Jaccard": ("pairwise_target_jaccard", "#7b1fa2"),
+}
+
+
+def _paint_cross_model_agreement(ax, subset, *, methods):
+    """Cross-codemaster agreement, one bar pair per prompt method.
+
+    There is no per-model value to plot: agreement is a property of the panel,
+    not of one codemaster. Prompt method takes the x-axis instead.
+    """
+    width = 0.8 / len(_AGREEMENT_METRICS)
+    stats = (
+        None if subset.empty
+        else summarize(
+            subset, ["method"],
+            [column for column, _ in _AGREEMENT_METRICS.values()],
+        ).set_index("method")
+    )
+
+    for mi, (label, (column, color)) in enumerate(_AGREEMENT_METRICS.items()):
+        offsets = [xi - 0.4 + width * (mi + 0.5) for xi in range(len(methods))]
+        if stats is None:
+            values = [float("nan")] * len(methods)
+            counts = [0] * len(methods)
+        else:
+            rows = stats.reindex(methods)
+            values = rows[f"{column}_mean"].astype("float64").fillna(0.0).to_numpy()
+            counts = rows["n"].fillna(0).to_numpy()
+        ax.bar(offsets, values, width=width * 0.92, color=color,
+               edgecolor="white", linewidth=0.4)
+        annotate_n(ax, offsets, counts, y=1.02, fontsize=6.5)
+
+    ax.set_xticks(range(len(methods)))
+    ax.set_xticklabels(list(methods))
+    ax.set_xlim(-0.6, len(methods) - 0.4)
+    ax.set_ylim(0, 1.14)
+    ax.grid(axis="y", alpha=0.25, linewidth=0.5)
+    ax.set_axisbelow(True)
+
+
+def fig_cross_model_agreement_grid(rounds: pd.DataFrame, row_col: str):
+    """Do the codemasters converge on the same round-1 clue?
+
+    Pairs are cross-codemaster only, so a model's own repeats cannot inflate
+    the number.
+    """
+    panels = _agreement.panel_agreement(rounds)
+    if panels.empty:
+        return None
+    methods = _method_order(panels)
+    label = _ROW_LABELS.get(row_col, row_col)
+    return facet_grid(
+        panels,
+        _paint_cross_model_agreement,
+        row_col=row_col,
+        methods=methods,
+        title=f"Round-1 agreement across codemasters, by board style and {label}",
+        ylabel="cross-codemaster agreement",
+        subtitle="pairs from different codemasters only; number above each bar "
+                 "= board panels behind it",
+        legend_handles=_legend(
+            {label: color for label, (_, color) in _AGREEMENT_METRICS.items()}
+        ),
+        panel_width=FACET_WIDTH * 1.05,
+    )
+
+
 # The registry, in reading order. Figures that a run cannot support return
 # None and are skipped: the guesser grids need a crossed run, the floor grids
 # need more than one arm, and the pair matrix needs both.
@@ -1006,6 +1169,12 @@ FIGURES = {
     "09_first_guess_vs_chance": lambda data: fig_first_guess_vs_chance(data.games),
     "10_pair_matrix": lambda data: fig_pair_matrix(data.games),
     "11_count_by_round": lambda data: fig_count_by_round(data.rounds),
+    "12_self_consistency": lambda data: fig_self_consistency_grid(
+        data.rounds, "count_constraint"
+    ),
+    "13_cross_model_agreement": lambda data: fig_cross_model_agreement_grid(
+        data.rounds, "count_constraint"
+    ),
 }
 
 
