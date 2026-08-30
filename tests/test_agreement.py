@@ -3,7 +3,7 @@ import pandas as pd
 
 from codenames_heb.agreement import (
     CELL_KEY, PANEL_KEY, first_rounds, normalize_clue, panel_agreement,
-    consensus_hard_by_dual, word_consensus,
+    consensus_hard_by_dual, word_consensus, rank_panels, render_exhibit,
 )
 
 
@@ -208,3 +208,33 @@ def test_consensus_hard_crosses_with_the_dual_flag(cell_rounds, boards):
 
     assert "is_consensus_hard_mean" in out.columns
     assert set(out["is_dual"]) == {0.0, 1.0}
+
+
+def test_rank_panels_puts_the_most_disagreed_board_first(cell_rounds):
+    panels = panel_agreement(cell_rounds)
+    ranked = rank_panels(panels, top=1)
+
+    assert len(ranked) == 1
+    assert ranked.iloc[0]["n_distinct_clues"] == panels["n_distinct_clues"].max()
+
+
+def test_exhibit_shows_every_draw_and_every_board_word(cell_rounds, boards):
+    key = {"board_style": "natural", "board_seed": 0,
+           "method": "strong_hebrew", "count_constraint": "free"}
+
+    text = render_exhibit(cell_rounds, boards, key)
+
+    # All 8 round-1 draws, and no round-2 clue.
+    assert text.count("v/alpha") == 4
+    assert "אחר" not in text
+    # All four board words, with their roles.
+    for word in ("א", "ב", "ד", "ה"):
+        assert word in text
+    assert "civilian" in text
+
+
+def test_exhibit_says_when_a_panel_has_no_rounds(cell_rounds, boards):
+    key = {"board_style": "natural", "board_seed": 999,
+           "method": "strong_hebrew", "count_constraint": "free"}
+
+    assert "no round-1 draws" in render_exhibit(cell_rounds, boards, key)

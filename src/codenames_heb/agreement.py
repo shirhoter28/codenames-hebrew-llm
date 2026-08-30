@@ -194,3 +194,46 @@ def consensus_hard_by_dual(consensus: pd.DataFrame) -> pd.DataFrame:
     return summarize(targets, ["board_style", "is_dual"],
                      ["is_consensus_hard", "word_pick_rate"],
                      proportions=["is_consensus_hard"])
+
+
+def rank_panels(agreement: pd.DataFrame, by: str = "n_distinct_clues",
+                top: int = 10) -> pd.DataFrame:
+    """The panels worth reading, most disagreed first.
+
+    This is what makes case selection principled rather than anecdotal, and it
+    doubles as the stratified sampling frame for later labelling work.
+    """
+    if agreement.empty or by not in agreement.columns:
+        return agreement
+    return agreement.sort_values(by, ascending=False).head(top)
+
+
+def render_exhibit(rounds: pd.DataFrame, boards: dict, panel_key: dict) -> str:
+    """One board's round-1 draws as readable markdown.
+
+    Aggregate agreement numbers are not qualitative material; this is.
+    """
+    first = first_rounds(rounds)
+    for column, value in panel_key.items():
+        first = first[first[column] == value]
+
+    title = (f"### {panel_key.get('board_style')} seed {panel_key.get('board_seed')} "
+             f"— {panel_key.get('method')} / {panel_key.get('count_constraint')}")
+    if first.empty:
+        return f"{title}\n\n_(no round-1 draws for this panel)_\n"
+
+    board = boards.get((panel_key.get("board_style"), panel_key.get("board_seed"))) or {}
+    is_dual = board.get("is_dual") or {}
+
+    lines = [title, "", "| word | role | dual |", "|---|---|---|"]
+    for word, role in (board.get("roles") or {}).items():
+        lines.append(f"| {word} | {role} | {'yes' if is_dual.get(word) else ''} |")
+
+    lines += ["", "| codemaster | clue | count | aimed at | result |", "|---|---|---|---|---|"]
+    for row in first.sort_values(["model", "guesser_model"]).itertuples(index=False):
+        aimed = ", ".join(row.intended_targets or [])
+        result = f"{row.n_correct} correct, {row.stop_class}"
+        if row.first_miss_role:
+            result += f" (miss: {row.first_miss_role})"
+        lines.append(f"| {row.model} | {row.clue} | {row.count} | {aimed} | {result} |")
+    return "\n".join(lines) + "\n"
