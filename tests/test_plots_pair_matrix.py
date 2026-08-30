@@ -82,6 +82,49 @@ def test_pair_matrix_orients_codemasters_and_guessers_on_named_axes(grid_games):
     assert "codemaster" in labels and "guesser" in labels
 
 
+def test_pair_matrix_prints_a_margin_mean_per_row_and_column(grid_games):
+    """The docstring's advice is to read the margins, so they have to be on the
+    figure. A 4x4 grid splits a run sixteen ways and a single cell running hot
+    or cold is usually not evidence."""
+    fig = plots.fig_pair_matrix(grid_games)
+
+    ax = fig.axes[0]
+    ticks = [label.get_text() for label in ax.get_xticklabels()]
+    assert ticks[-1] == "all guessers"
+    assert [label.get_text() for label in ax.get_yticklabels()][-1] == "all codemasters"
+    # 2x2 pairs + a row margin, a column margin and the overall cell.
+    assert len([t for t in ax.texts if "n=" in t.get_text()]) == 4 + 2 + 2 + 1
+
+
+def test_pair_matrix_margins_come_from_the_games_not_the_cell_means(grid_games):
+    """Averaging the row of cell means only agrees with the model's own mean
+    when every cell holds the same number of games. A pooled or partially-run
+    design breaks that, and the margin must still report the true mean."""
+    lopsided = grid_games.drop(
+        grid_games[
+            (grid_games["model"] == MODELS[0])
+            & (grid_games["guesser_model"] == MODELS[1])
+        ].index[:5]
+    )
+    fig = plots.fig_pair_matrix(lopsided)
+
+    win_panel = fig.axes[-1] if "win" in fig.axes[-1].get_title() else fig.axes[1]
+    expected = lopsided[lopsided["model"] == MODELS[0]]["is_win"].mean()
+    margins = [t.get_text() for t in win_panel.texts if "n=" in t.get_text()]
+    assert f"{expected:.2f}" in " ".join(margins)
+
+
+def test_pair_matrix_outlines_the_self_play_diagonal(grid_games):
+    """"Did the model do better with itself" is a different question from the
+    rest of the grid, and should not have to be found by counting."""
+    fig = plots.fig_pair_matrix(grid_games)
+
+    outlines = [
+        patch for patch in fig.axes[0].patches if not patch.get_fill()
+    ]
+    assert len(outlines) == len(MODELS)
+
+
 def test_the_registry_offers_the_pair_matrix():
     assert any("pair_matrix" in name for name in plots.FIGURES)
 

@@ -1,4 +1,4 @@
-"""Figures 1 and 2 over M4 + M5 pooled, restricted to the comparable design.
+"""The game-level figures over M4 + M5 pooled, restricted to the comparable design.
 
     python scripts/pooled_figures.py results/<m4> results/<m5> --out results/<m5>/figures_pooled
 
@@ -47,6 +47,22 @@ def comparable(data):
     return dataclasses.replace(data, games=games, rounds=rounds)
 
 
+PANELS = (
+    ("01_outcome_composition", plots.fig_outcome_composition),
+    ("02_game_length", plots.fig_game_length),
+    ("03_win_rate_by_floor", lambda g: plots.fig_win_rate_grid(g, "count_constraint")),
+    ("04_win_rate_by_guesser", lambda g: plots.fig_win_rate_grid(g, "guesser_model")),
+    ("05_outcome_mix_by_floor", lambda g: plots.fig_outcome_grid(g, "count_constraint")),
+    ("06_outcome_mix_by_guesser", lambda g: plots.fig_outcome_grid(g, "guesser_model")),
+    ("07_game_length_by_floor",
+     lambda g: plots.fig_game_length_grid(g, "count_constraint")),
+    ("08_game_length_by_guesser",
+     lambda g: plots.fig_game_length_grid(g, "guesser_model")),
+    ("09_first_guess_vs_chance", plots.fig_first_guess_vs_chance),
+    ("10_pair_matrix", plots.fig_pair_matrix),
+)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("runs", nargs="+", type=Path)
@@ -81,11 +97,14 @@ def main(argv=None) -> int:
     print(f"methods: {sorted(g['method'].unique())}   arm: {sorted(g['count_constraint'].unique())}")
 
     args.out.mkdir(parents=True, exist_ok=True)
-    for name, build in (("01_outcome_composition", plots.fig_outcome_composition),
-                        ("02_game_length", plots.fig_game_length)):
+    # The same registry `report.py` writes, minus the round-level figure: this
+    # script pools game rows only. A grid whose row factor the pooled slice
+    # holds fixed returns None and is skipped — under `--scope comparable`
+    # that is every floor grid, since M5 ran min2 alone.
+    for name, build in PANELS:
         fig = build(g)
         if fig is None:
-            print(f"  {name}: skipped (not enough data yet)")
+            print(f"  {name}: skipped (this slice cannot support it)")
             continue
         path = args.out / f"{name}.png"
         fig.savefig(path, dpi=150, bbox_inches="tight")

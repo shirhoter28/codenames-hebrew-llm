@@ -728,6 +728,7 @@ def _game_level_round_means(rounds: list) -> dict:
         return {
             "mean_clue_count": None, "mean_recovered": None, "mean_jaccard": None,
             "early_stop_rate": None, "bonus_take_rate": None, "n_lucky_total": 0,
+            "first_guess_hit": None, "first_guess_baseline": None,
             "first_guess_lift": None,
         }
     frame = pd.DataFrame(rounds)
@@ -741,6 +742,14 @@ def _game_level_round_means(rounds: list) -> dict:
         # Averaged within the game first, so a 13-round game does not outweigh
         # a 5-round one 2.6x when games are later averaged together. Rounds
         # share a board and a revealed set, so they are not independent draws.
+        #
+        # The lift's two halves are carried alongside it because the difference
+        # cannot be read without them: the baseline is the pool as it stood
+        # when each round began, not the board's opening 9/25, so it moves with
+        # board style and with how long the game ran. Averaged the same way, so
+        # `hit - baseline` still equals `lift` game by game.
+        "first_guess_hit": frame["first_guess_hit"].mean(),
+        "first_guess_baseline": frame["first_guess_baseline"].mean(),
         "first_guess_lift": frame["first_guess_lift"].mean(),
     }
 

@@ -2,14 +2,19 @@
 
 Board style is the experiment's designed independent variable, so it is a
 facet in every figure rather than the subject of one plot. `facet_by_style`
-imposes a single layout — one column per style, shared y-axis, models on the
-x-axis — so the figures can be read against each other without re-learning the
-axes each time.
+imposes a single layout — one column per style, shared y-axis, codemasters on
+the x-axis — so the figures can be read against each other without re-learning
+the axes each time. `facet_grid` extends that to two dimensions: the same
+columns, with one *row* per level of a second assigned factor (the clue-count
+floor, or the guesser). A grid is the only honest way to show a factor the
+design crosses — collapsing it averages over a treatment that was deliberately
+varied, and an effect that reverses across the rows disappears entirely.
 
 Every figure prints n **per bar**, not per facet: a bar is what anyone reads
 off the chart, and a panel-level n overstates the evidence behind each column
 by the number of bars in it. In the 2026-08-16 run a model x method x style bar
-rests on 5 games. At this scale the figures show direction;
+rests on 5 games; on M4 the same bar rests on ~360, and a bar of the 3x3 floor
+grid on ~120. At the small end the figures show direction only;
 `analysis.scaling_projection` says what n makes them conclusive.
 """
 
@@ -25,31 +30,20 @@ import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from codenames_heb.analysis import (  # noqa: E402
-    STOP_CLASSES,
-    dual_miss_lift,
     style_order,
     summarize,
 )
 
 FACET_WIDTH = 4.3
 FACET_HEIGHT = 3.7
+# Grid rows are shorter than a standalone facet row: a 3x3 or 3x4 grid at the
+# full height is taller than it is wide, which no page wants.
+GRID_ROW_HEIGHT = 3.1
 
 # Fixed colours so a model keeps its colour across every figure.
 _MODEL_COLORS = plt.get_cmap("tab10").colors
 _OUTCOME_COLORS = {"win": "#2e7d32", "loss": "#c62828", "failed": "#9e9e9e"}
 _METHOD_HATCH = {"strong_hebrew": "", "translate_pipeline": "//"}
-
-# Ordered so the stack reads worst-to-best from the bottom.
-_STOP_COLORS = {
-    "miss_before_quota": "#c62828",
-    "miss_on_bonus_guess": "#ef6c00",
-    "early_stop_true": "#fbc02d",
-    "stopped_at_quota": "#2e7d32",
-    "bonus_taken_correct": "#1565c0",
-    "game_won_midround": "#7b1fa2",
-    "guesser_failure": "#616161",
-    "no_quota": "#bdbdbd",
-}
 
 
 def short_model(name) -> str:
@@ -61,6 +55,10 @@ def short_model(name) -> str:
 
 def _model_order(df: pd.DataFrame) -> list:
     return sorted(df["model"].dropna().unique())
+
+
+def _method_order(df: pd.DataFrame) -> list:
+    return sorted(df["method"].dropna().unique()) or ["-"]
 
 
 def _level_order(df: pd.DataFrame, column: str) -> list:
@@ -106,6 +104,109 @@ def annotate_n(ax, positions, counts, *, y, fontsize: int = 7, color: str = "#55
         )
 
 
+# --- the clue-count floor ladder -----------------------------------------
+#
+# Declared before the facet helpers because `facet_grid` has to order a row of
+# floors, and string order draws that ladder wrong.
+
+# The floors are a designed ladder, so they get a ramp rather than the
+# categorical model palette: free is neutral, and the numeric floors darken as
+# they tighten.
+_FREE_COLOR = "#90a4ae"
+_FLOOR_RAMP = ("#4db6ac", "#00897b", "#00695c", "#004d40")
+
+# A point on the clue-count-by-round figure needs this many rounds behind it to
+# be drawn. Late rounds only exist in the games that ran long, so without a
+# floor every panel ends on a tail traced by one or two games.
+MIN_ROUNDS_PER_POINT = 5
+
+
+def count_floor_order(values: Iterable) -> list:
+    """`free` first, then the numeric floors in numeric order.
+
+    Plain `sorted()` is string order, which puts `min10` between `free` and
+    `min2` and draws the ladder out of sequence. Unrecognised labels sort last
+    rather than raising, so an older run with a hand-edited arm still plots.
+    """
+    def key(label):
+        text = str(label)
+        if text == "free":
+            return (0, 0, "")
+        if text.startswith("min") and text[3:].isdigit():
+            return (1, int(text[3:]), "")
+        return (2, 0, text)
+
+    return sorted({str(v) for v in values}, key=key)
+
+
+def _floor_levels(df: pd.DataFrame) -> list:
+    """The clue-count floors this frame can actually contrast."""
+    if "count_constraint" not in df.columns:
+        return []
+    return count_floor_order(df["count_constraint"].dropna().unique())
+
+
+def _floor_colors(floors: Sequence) -> dict:
+    numeric = [f for f in floors if f != "free"]
+    colors = {"free": _FREE_COLOR}
+    for i, floor in enumerate(numeric):
+        colors[floor] = _FLOOR_RAMP[i % len(_FLOOR_RAMP)]
+    return colors
+
+
+# --- layout --------------------------------------------------------------
+
+# What a row of a grid is called, and how its levels are ordered. Anything not
+# listed falls back to plain sorted order.
+_ROW_LABELS = {
+    "count_constraint": "clue-count floor",
+    "guesser_model": "guesser",
+    "method": "prompt method",
+    "model": "codemaster",
+}
+
+
+def _row_levels(df: pd.DataFrame, column: str) -> list:
+    """The levels a grid row factor takes, in the order they should be read."""
+    if column not in df.columns:
+        return []
+    values = df[column].dropna().unique()
+    if column == "count_constraint":
+        return count_floor_order(values)
+    return sorted(values)
+
+
+def _style_levels(df: pd.DataFrame) -> list:
+    return style_order(df["board_style"].dropna().unique()) or ["unspecified"]
+
+
+def _figure_titles(fig, title: str, subtitle: str, *, y: float, gap: float):
+    """Suptitle plus an optional grey subtitle above it.
+
+    tight_layout is unaware of figure-level text placed above y=1, so the
+    titles go on afterwards; saving with bbox_inches="tight" (and the inline
+    backend's equivalent default) grows the canvas to include them.
+    """
+    if subtitle:
+        fig.suptitle(title, fontsize=12, y=y + gap)
+        fig.text(0.5, y, subtitle, ha="center", fontsize=8.5, color="#555555")
+    else:
+        fig.suptitle(title, fontsize=12, y=y)
+
+
+def _figure_legend(fig, legend_handles, *, y: float = -0.02):
+    if not legend_handles:
+        return
+    fig.legend(
+        handles=legend_handles,
+        loc="upper center",
+        bbox_to_anchor=(0.5, y),
+        ncol=min(len(legend_handles), 6),
+        frameon=False,
+        fontsize=9,
+    )
+
+
 def facet_by_style(
     df: pd.DataFrame,
     plot_fn: Callable,
@@ -115,6 +216,7 @@ def facet_by_style(
     sharey: bool = True,
     legend_handles: Sequence | None = None,
     subtitle: str = "",
+    panel_width: float = FACET_WIDTH,
     **kwargs,
 ):
     """One column per board style, shared axes, uniform titles.
@@ -124,14 +226,12 @@ def facet_by_style(
     the n that matters is printed per bar by `plot_fn`, because that is the
     number each comparison actually rests on.
     """
-    styles = style_order(df["board_style"].dropna().unique())
-    if not styles:
-        styles = ["unspecified"]
+    styles = _style_levels(df)
 
     fig, axes = plt.subplots(
         1,
         len(styles),
-        figsize=(FACET_WIDTH * len(styles), FACET_HEIGHT),
+        figsize=(panel_width * len(styles), FACET_HEIGHT),
         sharey=sharey,
         squeeze=False,
     )
@@ -144,24 +244,85 @@ def facet_by_style(
             label.set_ha("right")
 
     axes[0][0].set_ylabel(ylabel)
-    # tight_layout is unaware of figure-level text placed above y=1, so the
-    # titles go on afterwards; saving with bbox_inches="tight" (and the inline
-    # backend's equivalent default) grows the canvas to include them.
     fig.tight_layout()
-    if subtitle:
-        fig.suptitle(title, fontsize=12, y=1.13)
-        fig.text(0.5, 1.045, subtitle, ha="center", fontsize=8.5, color="#555555")
-    else:
-        fig.suptitle(title, fontsize=12, y=1.05)
-    if legend_handles:
-        fig.legend(
-            handles=legend_handles,
-            loc="upper center",
-            bbox_to_anchor=(0.5, -0.02),
-            ncol=min(len(legend_handles), 6),
-            frameon=False,
-            fontsize=9,
+    _figure_titles(fig, title, subtitle, y=1.045 if subtitle else 1.05, gap=0.085)
+    _figure_legend(fig, legend_handles)
+    return fig
+
+
+def facet_grid(
+    df: pd.DataFrame,
+    plot_fn: Callable,
+    *,
+    row_col: str,
+    title: str,
+    ylabel: str,
+    sharey: bool = True,
+    legend_handles: Sequence | None = None,
+    subtitle: str = "",
+    panel_width: float = FACET_WIDTH,
+    row_height: float = GRID_ROW_HEIGHT,
+    **kwargs,
+):
+    """`facet_by_style`, plus one row per level of `row_col`.
+
+    Returns None when `row_col` has fewer than two levels: a one-row "grid" is
+    the plain faceted figure under a heading that promises a contrast the run
+    cannot make.
+
+    The x tick labels are drawn on the bottom row only. Every panel shares the
+    same categories by construction, so repeating four rotated model names
+    under all nine or twelve panels spends a third of the canvas restating the
+    axis. The row's own level is named down the right-hand edge instead of in
+    each panel title, which keeps the column titles reading as board styles all
+    the way across.
+    """
+    rows = _row_levels(df, row_col)
+    if len(rows) < 2:
+        return None
+    styles = _style_levels(df)
+
+    fig, axes = plt.subplots(
+        len(rows),
+        len(styles),
+        figsize=(panel_width * len(styles), row_height * len(rows)),
+        sharey=sharey,
+        sharex=True,
+        squeeze=False,
+    )
+    for ri, row in enumerate(rows):
+        for ci, style in enumerate(styles):
+            ax = axes[ri][ci]
+            subset = df[(df["board_style"] == style) & (df[row_col].astype(str) == str(row))]
+            plot_fn(ax, subset, **kwargs)
+            if ri == 0:
+                ax.set_title(style, fontsize=10)
+            if ri == len(rows) - 1:
+                ax.tick_params(axis="x", labelrotation=45, labelsize=8)
+                for label in ax.get_xticklabels():
+                    label.set_ha("right")
+            else:
+                ax.tick_params(axis="x", labelbottom=False)
+        axes[ri][0].set_ylabel(ylabel)
+        axes[ri][-1].annotate(
+            short_model(row),
+            xy=(1.015, 0.5), xycoords="axes fraction",
+            rotation=-90, ha="left", va="center", fontsize=10, color="#333333",
         )
+
+    fig.tight_layout()
+    row_note = f"rows = {_ROW_LABELS.get(row_col, row_col)}; columns = board style"
+    _figure_titles(
+        fig,
+        title,
+        f"{row_note}. {subtitle}" if subtitle else row_note,
+        # The taller the figure, the smaller a fixed fraction of it a title
+        # band is; scaling keeps the gap looking the same on a 3-row and a
+        # 4-row grid.
+        y=1 + 0.055 * 3 / len(rows),
+        gap=0.045 * 3 / len(rows),
+    )
+    _figure_legend(fig, legend_handles, y=-0.012 * 3 / len(rows))
     return fig
 
 
@@ -209,488 +370,369 @@ def _legend(labels_colors, hatch=None):
     ]
 
 
-# --- 1. outcome composition ---------------------------------------------
+def _method_legend(methods: Sequence) -> list:
+    return _legend({m: "#ffffff" for m in methods}, hatch=_METHOD_HATCH)
 
 
-def fig_outcome_composition(games: pd.DataFrame):
-    """Win / loss / failure mix, model x method, faceted by style.
+# --- panel painters ------------------------------------------------------
+#
+# One painter per panel *kind*, shared by the plain faceted figure and its
+# grid. The levels are passed in from the whole frame rather than read off the
+# panel's own subset: a grid cell that happens to hold no games for one model
+# must still leave that model's slot empty, or the panels stop lining up and
+# the grid can no longer be read down a column.
 
-    Failures are kept visible rather than dropped: a model that cannot emit a
-    legal clue is failing in a different way than one that hits the assassin,
-    and collapsing the two flatters it.
+
+def _paint_outcome_stack(ax, subset, *, models, methods):
+    """Win / loss / failure shares, one stack per codemaster x method."""
+    width = 0.8 / len(methods)
+    positions, counts = [], []
+    for mi, method in enumerate(methods):
+        for xi, model in enumerate(models):
+            cell = subset[(subset["model"] == model) & (subset["method"] == method)]
+            total = len(cell) or 1
+            bottom = 0.0
+            x = xi - 0.4 + width * (mi + 0.5)
+            for group in ("win", "loss", "failed"):
+                share = (cell["outcome_group"] == group).sum() / total
+                ax.bar(x, share, width=width * 0.92, bottom=bottom,
+                       color=_OUTCOME_COLORS[group], edgecolor="white", linewidth=0.4,
+                       hatch=_METHOD_HATCH.get(method, ""))
+                bottom += share
+            positions.append(x)
+            counts.append(len(cell))
+    ax.set_xticks(range(len(models)))
+    ax.set_xticklabels([short_model(m) for m in models])
+    ax.set_xlim(-0.6, len(models) - 0.4)
+    ax.set_ylim(0, 1.14)
+    ax.grid(axis="y", alpha=0.25, linewidth=0.5)
+    ax.set_axisbelow(True)
+    annotate_n(ax, positions, counts, y=1.02, fontsize=6.5)
+
+
+def _paint_win_rate(ax, subset, *, models, methods, colors):
+    """Win rate with a Wilson 95% interval, one bar per codemaster x method.
+
+    Wilson rather than Wald: a cell that went 4-for-4 has a Wald SE of exactly
+    0, which draws as certainty. The bar keeps its *model's* colour and takes
+    the method's hatch, so the same model is the same colour in this figure as
+    in every other one and the method is still separable within the group.
+    """
+    width = 0.8 / len(methods)
+    if subset.empty:
+        stats = None
+    else:
+        stats = summarize(
+            subset, ["model", "method"], ["is_win"], proportions=["is_win"]
+        ).set_index(["model", "method"])
+
+    for mi, method in enumerate(methods):
+        offsets = [xi - 0.4 + width * (mi + 0.5) for xi in range(len(models))]
+        if stats is None:
+            rows = pd.DataFrame(
+                index=range(len(models)),
+                columns=["n", "is_win_mean", "is_win_lo", "is_win_hi"],
+                dtype="float64",
+            )
+        else:
+            rows = stats.reindex([(model, method) for model in models])
+        mean = rows["is_win_mean"].astype("float64")
+        lo = (mean - rows["is_win_lo"].astype("float64").fillna(mean)).clip(lower=0)
+        hi = (rows["is_win_hi"].astype("float64").fillna(mean) - mean).clip(lower=0)
+        ax.bar(
+            offsets,
+            mean.fillna(0.0).to_numpy(),
+            width=width * 0.92,
+            color=[colors[model] for model in models],
+            hatch=_METHOD_HATCH.get(method, ""),
+            yerr=[lo.fillna(0.0).to_numpy(), hi.fillna(0.0).to_numpy()],
+            capsize=2,
+            edgecolor="white",
+            linewidth=0.4,
+        )
+        annotate_n(ax, offsets, rows["n"].fillna(0).to_numpy(), y=1.02, fontsize=6.5)
+
+    ax.set_xticks(range(len(models)))
+    ax.set_xticklabels([short_model(m) for m in models])
+    ax.set_xlim(-0.6, len(models) - 0.4)
+    ax.set_ylim(0, 1.14)
+    ax.grid(axis="y", alpha=0.25, linewidth=0.5)
+    ax.set_axisbelow(True)
+
+
+def _paint_length_boxes(ax, subset, *, models, methods, top):
+    """Game length, one box per codemaster x method x outcome.
+
+    Outcome stays split for the reason `fig_game_length` gives: a game ends
+    either when all 9 targets are found or when the assassin is hit, so a
+    pooled box cannot tell an efficient win from an early death. Colour carries
+    the outcome and hatch the method, the same code as everywhere else.
+    """
+    series = [(method, outcome) for method in methods for outcome in ("win", "loss")]
+    width = 0.8 / len(series)
+    positions, counts = [], []
+    for si, (method, outcome) in enumerate(series):
+        for xi, model in enumerate(models):
+            values = subset[
+                (subset["model"] == model)
+                & (subset["method"] == method)
+                & (subset["outcome"] == outcome)
+            ]["game_length"].dropna()
+            position = xi - 0.4 + width * (si + 0.5)
+            positions.append(position)
+            counts.append(len(values))
+            if values.empty:
+                continue
+            box = ax.boxplot(
+                values, positions=[position], widths=width * 0.8, patch_artist=True,
+                medianprops={"color": "black", "linewidth": 1.0},
+                flierprops={"markersize": 2.5, "alpha": 0.4},
+            )
+            for patch in box["boxes"]:
+                patch.set_facecolor(_OUTCOME_COLORS[outcome])
+                patch.set_alpha(0.65)
+                patch.set_hatch(_METHOD_HATCH.get(method, ""))
+    ax.set_xticks(range(len(models)))
+    ax.set_xticklabels([short_model(m) for m in models])
+    ax.set_xlim(-0.6, len(models) - 0.4)
+    ax.set_ylim(0, top * 1.16)
+    ax.grid(axis="y", alpha=0.25, linewidth=0.5)
+    ax.set_axisbelow(True)
+    # Wins and losses split a cell unevenly, so every box needs its own n.
+    annotate_n(ax, positions, counts, y=top * 1.03, fontsize=6)
+
+
+# --- 1-2. the two headline figures, and their grids ----------------------
+
+
+def _with_outcome_group(games: pd.DataFrame) -> pd.DataFrame:
+    """`win` / `loss` / `failed`, keeping failures visible.
+
+    A model that cannot emit a legal clue is failing in a different way than
+    one that hits the assassin, and collapsing the two flatters it.
     """
     frame = games.copy()
     frame["outcome_group"] = frame["outcome"].where(
         frame["outcome"].isin(["win", "loss"]), "failed"
     )
+    return frame
 
-    def draw(ax, subset):
-        models = _model_order(games)
-        methods = sorted(subset["method"].dropna().unique()) or ["-"]
-        width = 0.8 / len(methods)
-        positions, counts = [], []
-        for mi, method in enumerate(methods):
-            for xi, model in enumerate(models):
-                cell = subset[(subset["model"] == model) & (subset["method"] == method)]
-                total = len(cell) or 1
-                bottom = 0.0
-                x = xi - 0.4 + width * (mi + 0.5)
-                for group in ("win", "loss", "failed"):
-                    share = (cell["outcome_group"] == group).sum() / total
-                    ax.bar(x, share, width=width * 0.92, bottom=bottom,
-                           color=_OUTCOME_COLORS[group], edgecolor="white", linewidth=0.4,
-                           hatch=_METHOD_HATCH.get(method, ""))
-                    bottom += share
-                positions.append(x)
-                counts.append(len(cell))
-        ax.set_xticks(range(len(models)))
-        ax.set_xticklabels([short_model(m) for m in models])
-        ax.set_ylim(0, 1.14)
-        annotate_n(ax, positions, counts, y=1.02)
 
-    handles = _legend(_OUTCOME_COLORS)
-    handles += _legend({m: "#ffffff" for m in _METHOD_HATCH}, hatch=_METHOD_HATCH)
+def _outcome_legend(methods: Sequence) -> list:
+    return _legend(_OUTCOME_COLORS) + _method_legend(methods)
+
+
+def fig_outcome_composition(games: pd.DataFrame):
+    """Win / loss / failure mix, codemaster x method, faceted by style."""
+    frame = _with_outcome_group(games)
+    models, methods = _model_order(games), _method_order(games)
     return facet_by_style(
         frame,
-        draw,
-        title="Game outcome by model and prompt method (hatched = translate_pipeline)",
+        _paint_outcome_stack,
+        models=models,
+        methods=methods,
+        title="Game outcome by codemaster and prompt method (hatched = translate_pipeline)",
         ylabel="share of games",
         subtitle="number above each bar = games behind that bar",
-        legend_handles=handles,
+        legend_handles=_outcome_legend(methods),
     )
 
 
-# --- 2. game length ------------------------------------------------------
+def fig_outcome_grid(games: pd.DataFrame, row_col: str):
+    """`fig_outcome_composition`, split a second way.
+
+    The same nine or twelve panels the report's tables cover, drawn: the
+    columns are still board style, and the rows are the factor named by
+    `row_col` — the clue-count floor, or the guesser. Both are assigned
+    treatments the design crosses, so averaging over either is averaging over
+    something the experiment deliberately varied.
+    """
+    frame = _with_outcome_group(games)
+    models, methods = _model_order(games), _method_order(games)
+    label = _ROW_LABELS.get(row_col, row_col)
+    return facet_grid(
+        frame,
+        _paint_outcome_stack,
+        row_col=row_col,
+        models=models,
+        methods=methods,
+        title=f"Game outcome by codemaster, prompt method, board style and {label}",
+        ylabel="share of games",
+        subtitle="hatched = translate_pipeline; number above each bar = games behind it",
+        legend_handles=_outcome_legend(methods),
+        panel_width=FACET_WIDTH * 1.05,
+    )
+
+
+def fig_win_rate_grid(games: pd.DataFrame, row_col: str):
+    """Win rate alone, on the same grid as `fig_outcome_grid`.
+
+    The stacked figure answers "what happened"; this one answers "how often did
+    they win, and how sure are we". Dropping the loss/failure split buys the
+    room for an interval, and a bar whose height starts at a common zero is a
+    far easier comparison across nine or twelve panels than the middle band of
+    a stack.
+    """
+    completed = games[games["completed"]]
+    if completed.empty:
+        return None
+    models, methods = _model_order(completed), _method_order(completed)
+    colors = _colors_for(models)
+    label = _ROW_LABELS.get(row_col, row_col)
+    return facet_grid(
+        completed,
+        _paint_win_rate,
+        row_col=row_col,
+        models=models,
+        methods=methods,
+        colors=colors,
+        title=f"Win rate by codemaster, prompt method, board style and {label}",
+        ylabel="win rate",
+        subtitle="Wilson 95% bars, completed games only; hatched = "
+                 "translate_pipeline; number above each bar = games behind it",
+        legend_handles=_legend({short_model(m): colors[m] for m in models})
+        + _method_legend(methods),
+        panel_width=FACET_WIDTH * 1.05,
+    )
 
 
 def fig_game_length(games: pd.DataFrame):
-    """Length split by outcome, because the two are confounded: a game ends
-    either when all 9 targets are found or when the assassin is hit, so a
-    short game is an efficient win *or* an early death."""
-    completed = games[games["completed"]]
+    """Length split by outcome and prompt method.
 
+    Outcome and length are confounded: a game ends either when all 9 targets
+    are found or when the assassin is hit, so a short game is an efficient win
+    *or* an early death. Method is split out too, because it is the other
+    thing the codemaster side of the design varies and pooling it here would
+    make this the one game-level figure that hides it.
+    """
+    completed = games[games["completed"]]
+    models, methods = _model_order(completed), _method_order(completed)
     top = completed["game_length"].max()
+    return facet_by_style(
+        completed,
+        _paint_length_boxes,
+        models=models,
+        methods=methods,
+        top=top,
+        title="Game length (rounds) by outcome and prompt method — completed games only",
+        ylabel="rounds",
+        subtitle="hatched = translate_pipeline; number above each box = games in that box",
+        legend_handles=_legend({k: v for k, v in _OUTCOME_COLORS.items() if k != "failed"})
+        + _method_legend(methods),
+        panel_width=FACET_WIDTH * 1.5,
+    )
+
+
+def fig_game_length_grid(games: pd.DataFrame, row_col: str):
+    """`fig_game_length`, split a second way — the length companion to
+    `fig_win_rate_grid`.
+
+    Sixteen boxes to a panel is a lot, and the alternative was worse: pooling
+    the outcomes to halve them would hide whether a floor that shortens games
+    is winning faster or dying sooner, which is the whole question length is
+    asked to answer.
+    """
+    completed = games[games["completed"]]
+    if completed.empty:
+        return None
+    models, methods = _model_order(completed), _method_order(completed)
+    label = _ROW_LABELS.get(row_col, row_col)
+    return facet_grid(
+        completed,
+        _paint_length_boxes,
+        row_col=row_col,
+        models=models,
+        methods=methods,
+        # From the whole frame, so every panel of the grid is on one scale.
+        top=completed["game_length"].max(),
+        title=f"Game length (rounds) by codemaster, prompt method, board style and {label}",
+        ylabel="rounds",
+        subtitle="completed games only; colour = outcome, hatch = prompt method; "
+                 "number above each box = games in it",
+        legend_handles=_legend({k: v for k, v in _OUTCOME_COLORS.items() if k != "failed"})
+        + _method_legend(methods),
+        panel_width=FACET_WIDTH * 1.55,
+        row_height=GRID_ROW_HEIGHT * 1.05,
+    )
+
+
+# --- 9. first guess against chance ---------------------------------------
+
+
+_FIRST_GUESS_COLORS = {
+    "observed first guess on a target": "#1565c0",
+    "chance, given the pool at that point": "#b0bec5",
+}
+
+
+def fig_first_guess_vs_chance(games: pd.DataFrame):
+    """The sharpest codemaster signal in the data, drawn against its baseline.
+
+    The first guess of a round is the one the clue is most responsible for,
+    before the guesser has any feedback to work from — and it separates the
+    models several times more sharply than win rate does.
+
+    It is shown as observed *next to* chance rather than as the difference,
+    because the difference alone is unreadable without knowing what it is a
+    difference from: the baseline is not the board's opening 9/25, it is the
+    pool as it stood when that round began, and it moves with board style and
+    with how long the game ran. Both bars are per-game means first, so a
+    13-round game does not outweigh a 5-round one; the gap between them is the
+    lift, printed above each pair.
+    """
+    completed = games[games["completed"]]
+    metrics = list(_FIRST_GUESS_COLORS)
+    columns = {"first_guess_hit": metrics[0], "first_guess_baseline": metrics[1]}
+    if completed.empty or not set(columns) <= set(completed.columns):
+        return None
+
+    models = _model_order(completed)
 
     def draw(ax, subset):
-        models = _model_order(completed)
-        positions, counts = [], []
+        stats = (
+            summarize(subset, ["model"], list(columns))
+            .set_index("model")
+            .reindex(models)
+        )
+        placed = _grouped_bars(
+            ax,
+            models,
+            {label: stats[f"{column}_mean"].to_numpy() for column, label in columns.items()},
+            _FIRST_GUESS_COLORS,
+            errors={
+                label: stats[f"{column}_se"].to_numpy() for column, label in columns.items()
+            },
+        )
+        # Both bars are proportions, so the axis runs to 1 — but nothing here
+        # gets near it, and a panel that is half empty air makes a 0.35 gap
+        # look smaller than it is. Cropped to just above the n row instead.
+        ax.set_ylim(0, 1.08)
+        annotate_n(ax, range(len(models)), stats["first_guess_hit_n"].to_numpy(), y=0.98)
+        # The lift is the gap, and a gap is hard to measure by eye across three
+        # panels — so it is also stated, over the pair it belongs to.
+        hit = stats["first_guess_hit_mean"]
+        chance = stats["first_guess_baseline_mean"]
         for xi, model in enumerate(models):
-            for oi, (outcome, color) in enumerate(
-                (("win", _OUTCOME_COLORS["win"]), ("loss", _OUTCOME_COLORS["loss"]))
-            ):
-                values = subset[
-                    (subset["model"] == model) & (subset["outcome"] == outcome)
-                ]["game_length"].dropna()
-                position = xi - 0.18 + 0.36 * oi
-                positions.append(position)
-                counts.append(len(values))
-                if values.empty:
-                    continue
-                box = ax.boxplot(
-                    values, positions=[position], widths=0.3, patch_artist=True,
-                    medianprops={"color": "black", "linewidth": 1.2},
-                    flierprops={"markersize": 3, "alpha": 0.5},
-                )
-                for patch in box["boxes"]:
-                    patch.set_facecolor(color)
-                    patch.set_alpha(0.65)
-        ax.set_xticks(range(len(models)))
-        ax.set_xticklabels([short_model(m) for m in models])
-        ax.set_xlim(-0.6, len(models) - 0.4)
-        ax.set_ylim(0, top * 1.16)
-        # Wins and losses split the 10 games behind each model unevenly, so
-        # every box needs its own n.
-        annotate_n(ax, positions, counts, y=top * 1.04)
+            lift = hit.get(model)
+            if lift is None or pd.isna(lift) or pd.isna(chance.get(model)):
+                continue
+            gap = lift - chance[model]
+            ax.annotate(
+                f"{gap:+.2f}",
+                (sum(xs[xi] for xs in placed.values()) / len(placed), max(lift, chance[model]) + 0.04),
+                ha="center", va="bottom", fontsize=7.5, color="#1565c0",
+            )
 
     return facet_by_style(
         completed,
         draw,
-        title="Game length (rounds) by outcome — completed games only",
-        ylabel="rounds",
-        subtitle="number above each box = games in that box",
-        legend_handles=_legend({k: v for k, v in _OUTCOME_COLORS.items() if k != "failed"}),
+        title="First guess of a round vs the chance of guessing right (SE bars)",
+        ylabel="share of first guesses on a target",
+        subtitle="per-game means; blue number = lift over chance; "
+                 "grey number above each pair = completed games behind it",
+        legend_handles=_legend(_FIRST_GUESS_COLORS),
+        panel_width=FACET_WIDTH * 1.15,
     )
-
-
-# --- 3. ambiguity ladder -------------------------------------------------
-
-
-def fig_ambiguity_ladder(games: pd.DataFrame):
-    """The one figure where style is the x-axis rather than the facet: win
-    rate across the dual_0 -> dual_100 ladder, one line per model, split into
-    a panel per prompt method."""
-    completed = games[games["completed"]]
-    styles = style_order(completed["board_style"].dropna().unique())
-    methods = sorted(completed["method"].dropna().unique())
-    models = _model_order(completed)
-    colors = _colors_for(models)
-
-    fig, axes = plt.subplots(
-        1, len(methods) or 1,
-        figsize=(FACET_WIDTH * max(len(methods), 1) * 1.15, FACET_HEIGHT),
-        sharey=True, squeeze=False,
-    )
-    stats = summarize(completed, ["method", "board_style", "model"], ["is_win"])
-
-    # Models frequently land on identical win rates at n=5 (0.6 and 0.6 draw
-    # exactly on top of each other), so each series is nudged sideways.
-    dodge = 0.07
-    for ax, method in zip(axes[0], methods):
-        for mi, model in enumerate(models):
-            line = stats[(stats["method"] == method) & (stats["model"] == model)]
-            line = line.set_index("board_style").reindex(styles)
-            offset = (mi - (len(models) - 1) / 2) * dodge
-            ax.errorbar(
-                [x + offset for x in range(len(styles))],
-                line["is_win_mean"],
-                yerr=line["is_win_se"],
-                marker="o", capsize=3, linewidth=1.6, markersize=5,
-                color=colors[model], label=short_model(model),
-            )
-        ax.set_xticks(range(len(styles)))
-        ax.set_xticklabels(styles, rotation=45, ha="right", fontsize=8)
-        ax.set_title(method, fontsize=10)
-        ax.set_ylim(-0.05, 1.05)
-        ax.grid(axis="y", alpha=0.25, linewidth=0.5)
-        ax.set_axisbelow(True)
-
-    axes[0][0].set_ylabel("win rate")
-    # n is the same at every point here (one model x method x style cell), so
-    # it is stated once rather than printed 16 times.
-    per_point = sorted(stats["is_win_n"].dropna().unique())
-    n_note = (
-        f"n = {int(per_point[0])} completed games per point"
-        if len(per_point) == 1
-        else f"n = {int(min(per_point))}–{int(max(per_point))} completed games per point"
-    )
-    fig.suptitle("Ambiguity ladder: win rate vs board style (SE bars)", fontsize=12, y=1.09)
-    fig.text(0.5, 1.02, n_note, ha="center", fontsize=8.5, color="#555555")
-    fig.legend(
-        handles=_legend({short_model(m): colors[m] for m in models}),
-        loc="upper center", bbox_to_anchor=(0.5, -0.02),
-        ncol=min(len(models), 4), frameon=False, fontsize=9,
-    )
-    fig.tight_layout()
-    return fig
-
-
-# --- 4. stop behaviour ---------------------------------------------------
-
-
-def fig_stop_behaviour(rounds: pd.DataFrame):
-    """How each round ended, as within-model shares.
-
-    Grouped by whoever is varying in the *guesser* seat: stopping early,
-    taking the bonus guess and missing before quota are all the guesser's
-    decisions, so a crossed run attributes them to the guesser rather than to
-    the codemaster whose clue prompted them.
-
-    Methods are collapsed here: eight stacked bars per facet is unreadable,
-    and the method breakdown is available numerically in the round summary
-    table.
-    """
-    present = [c for c in STOP_CLASSES if (rounds["stop_class"] == c).any()]
-    actor = _actor_column(rounds)
-
-    def draw(ax, subset):
-        models = _level_order(rounds, actor)
-        counts = []
-        for xi, model in enumerate(models):
-            cell = subset[subset[actor] == model]
-            total = len(cell) or 1
-            bottom = 0.0
-            for cls in present:
-                share = (cell["stop_class"] == cls).sum() / total
-                ax.bar(xi, share, width=0.65, bottom=bottom, color=_STOP_COLORS[cls],
-                       edgecolor="white", linewidth=0.4)
-                bottom += share
-            counts.append(len(cell))
-        ax.set_xticks(range(len(models)))
-        ax.set_xticklabels([short_model(m) for m in models])
-        ax.set_ylim(0, 1.14)
-        annotate_n(ax, range(len(models)), counts, y=1.02)
-
-    role = "guesser" if actor == "guesser_model" else "codemaster"
-    return facet_by_style(
-        rounds,
-        draw,
-        title=f"How rounds ended (stop taxonomy) by {role}",
-        ylabel="share of rounds",
-        subtitle="number above each bar = rounds behind that bar",
-        legend_handles=_legend({c: _STOP_COLORS[c] for c in present}),
-    )
-
-
-# --- 5. intended-vs-hit overlap -----------------------------------------
-
-
-def fig_intended_overlap(rounds: pd.DataFrame):
-    """Agreement between the words the codemaster aimed at and the ones the
-    guesser found."""
-    metrics = {
-        "intended_recall": "#1565c0",
-        "intended_precision": "#2e7d32",
-        "intended_jaccard": "#6a1b9a",
-    }
-
-    def draw(ax, subset):
-        models = _model_order(rounds)
-        stats = summarize(subset, ["model"], list(metrics)).set_index("model").reindex(models)
-        _grouped_bars(
-            ax,
-            models,
-            {m: stats[f"{m}_mean"].to_numpy() for m in metrics},
-            {m: c for m, c in metrics.items()},
-            errors={m: stats[f"{m}_se"].to_numpy() for m in metrics},
-        )
-        ax.set_ylim(0, 1.14)
-        annotate_n(ax, range(len(models)), stats["n"].to_numpy(), y=1.02)
-
-    return facet_by_style(
-        rounds,
-        draw,
-        title="Intended targets vs targets actually hit (SE bars)",
-        ylabel="rate",
-        subtitle="number above each group = rounds behind that group "
-        "(both prompt methods pooled, i.e. 10 games)",
-        legend_handles=_legend(metrics),
-    )
-
-
-# --- 6. ambition vs yield ------------------------------------------------
-
-
-def fig_ambition_vs_yield(rounds: pd.DataFrame):
-    """Words the codemaster commits a clue to (`count`) against the targets
-    that clue actually buys (`n_correct`). The gap is what a harder board
-    costs, and whether a model shrinks its ambition to compensate."""
-    metrics = {"count": "#455a64", "n_correct": "#00897b"}
-    labels = {"count": "clue count (ambition)", "n_correct": "targets recovered (yield)"}
-
-    top = summarize(rounds, ["model", "board_style"], ["count"])
-    ceiling = float((top["count_mean"] + top["count_se"]).max()) * 1.08
-
-    def draw(ax, subset):
-        models = _model_order(rounds)
-        stats = summarize(subset, ["model"], list(metrics)).set_index("model").reindex(models)
-        _grouped_bars(
-            ax,
-            models,
-            {labels[m]: stats[f"{m}_mean"].to_numpy() for m in metrics},
-            {labels[m]: c for m, c in metrics.items()},
-            errors={labels[m]: stats[f"{m}_se"].to_numpy() for m in metrics},
-        )
-        ax.set_ylim(0, ceiling * 1.06)
-        annotate_n(ax, range(len(models)), stats["n"].to_numpy(), y=ceiling)
-
-    return facet_by_style(
-        rounds,
-        draw,
-        title="Clue ambition vs yield, per round (SE bars)",
-        ylabel="words per round",
-        subtitle="number above each group = rounds behind that group "
-        "(both prompt methods pooled, i.e. 10 games)",
-        legend_handles=_legend({labels[m]: c for m, c in metrics.items()}),
-    )
-
-
-# --- 7. dual-word miss lift ---------------------------------------------
-
-
-def fig_dual_miss_lift(rounds: pd.DataFrame, boards: dict):
-    """Does ambiguity actually pull the guesser off target?
-
-    Observed share of first misses landing on a dual-list word against the
-    board's own dual fraction. A lift of 1 means ambiguous words are hit at
-    exactly their base rate — i.e. ambiguity is not the mechanism.
-    """
-    actor = _actor_column(rounds)
-    lift = dual_miss_lift(rounds, boards, ["board_style", actor])
-    lift = lift[lift["expected"] > 0]
-    if lift.empty:
-        return None
-
-    styles = style_order(lift["board_style"].unique())
-    models = sorted(lift[actor].unique())
-    colors = _colors_for(models)
-
-    fig, ax = plt.subplots(figsize=(FACET_WIDTH * 1.9, FACET_HEIGHT))
-    width = 0.8 / max(len(models), 1)
-    for mi, model in enumerate(models):
-        rows = lift[lift[actor] == model].set_index("board_style").reindex(styles)
-        offsets = [i - 0.4 + width * (mi + 0.5) for i in range(len(styles))]
-        ax.bar(offsets, rows["observed"], width=width * 0.9, color=colors[model],
-               label=short_model(model), edgecolor="white", linewidth=0.4)
-        annotate_n(ax, offsets, rows["n_misses"].to_numpy(), y=1.01, fontsize=6.5)
-
-    for i, style in enumerate(styles):
-        expected = lift[lift["board_style"] == style]["expected"].iloc[0]
-        ax.plot([i - 0.45, i + 0.45], [expected, expected], color="black",
-                linestyle="--", linewidth=1.4,
-                label="board dual fraction (chance)" if i == 0 else None)
-
-    ax.set_xticks(range(len(styles)))
-    ax.set_xticklabels(styles)
-    ax.set_ylabel("share of first misses on a dual word")
-    ax.set_ylim(0, 1.09)
-    ax.grid(axis="y", alpha=0.25, linewidth=0.5)
-    ax.set_axisbelow(True)
-    ax.set_title("Do misses prefer ambiguous words? Observed vs chance", fontsize=12, pad=18)
-    ax.text(0.5, 1.02, "number above each bar = first misses behind that bar",
-            transform=ax.transAxes, ha="center", fontsize=8.5, color="#555555")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1),
-              ncol=min(len(models) + 1, 3), frameon=False, fontsize=9)
-    fig.tight_layout()
-    return fig
-
-
-def fig_first_guess_lift(games: pd.DataFrame):
-    """How far the first guess of a round beats blind chance, per model.
-
-    The per-model lines are drawn against the pooled average deliberately:
-    pooling flattens this metric almost completely, because the models move in
-    opposite directions across the ladder. Reading only the pooled line would
-    say ambiguity does nothing, when what is actually happening is that the
-    strongest model degrades and the weakest improves.
-    """
-    completed = games[games["completed"]]
-    if "first_guess_lift" not in completed.columns:
-        return None
-
-    styles = style_order(completed["board_style"].dropna().unique())
-    models = _model_order(completed)
-    colors = _colors_for(models)
-    stats = summarize(completed, ["board_style", "model"], ["first_guess_lift"])
-    pooled = summarize(completed, ["board_style"], ["first_guess_lift"])
-
-    fig, ax = plt.subplots(figsize=(FACET_WIDTH * 2.0, FACET_HEIGHT))
-    # Wide enough that the per-point n labels underneath do not run together.
-    dodge = 0.14
-    for mi, model in enumerate(models):
-        line = stats[stats["model"] == model].set_index("board_style").reindex(styles)
-        offset = (mi - (len(models) - 1) / 2) * dodge
-        ax.errorbar(
-            [x + offset for x in range(len(styles))],
-            line["first_guess_lift_mean"],
-            yerr=line["first_guess_lift_se"],
-            marker="o", capsize=3, linewidth=1.6, markersize=5,
-            color=colors[model], label=short_model(model),
-        )
-        annotate_n(
-            ax,
-            [x + offset for x in range(len(styles))],
-            line["first_guess_lift_n"].to_numpy(),
-            y=-0.075,
-            fontsize=6.5,
-        )
-
-    pooled_line = pooled.set_index("board_style").reindex(styles)
-    ax.plot(range(len(styles)), pooled_line["first_guess_lift_mean"],
-            color="black", linestyle="--", linewidth=1.8, marker="s", markersize=4,
-            label="pooled (hides the cancellation)")
-    ax.axhline(0, color="#999999", linewidth=1, zorder=0)
-
-    ax.set_xticks(range(len(styles)))
-    ax.set_xticklabels(styles)
-    ax.set_ylabel("first-guess lift over chance")
-    ax.set_ylim(-0.1, 0.7)
-    ax.grid(axis="y", alpha=0.25, linewidth=0.5)
-    ax.set_axisbelow(True)
-    ax.set_title(
-        "First guess vs blind chance, per game then averaged (SE bars)",
-        fontsize=12, pad=18,
-    )
-    ax.text(0.5, 1.02, "number under each point = completed games behind it",
-            transform=ax.transAxes, ha="center", fontsize=8.5, color="#555555")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12),
-              ncol=min(len(models) + 1, 3), frameon=False, fontsize=9)
-    fig.tight_layout()
-    return fig
-
-
-# --- 9. winning game length across the ladder ---------------------------
-
-
-def fig_win_length_ladder(games: pd.DataFrame):
-    """Rounds needed to win, across the dual_0 -> dual_100 ladder.
-
-    The companion to `fig_ambiguity_ladder`, on the same axes: win rate says
-    how often the pair finds all nine targets, this says how dearly. Losses
-    are excluded rather than faceted because they end the moment the assassin
-    is hit, so a lost game is short for the opposite reason a won game is —
-    mixing the two makes ambiguity look free (see `fig_game_length`).
-
-    n moves a lot from point to point here, since a cell contributes only its
-    wins and a model can win nothing at all on a hard style, so every point
-    carries its own n instead of the single figure-level note fig 3 can use.
-    """
-    completed = games[games["completed"]]
-    wins = completed[completed["is_win"] == 1.0]
-    if wins.empty:
-        return None
-
-    styles = style_order(completed["board_style"].dropna().unique())
-    methods = sorted(completed["method"].dropna().unique())
-    # Models come from the completed games, not the wins, so a model that
-    # never won still gets its colour slot and shows up as an explicit 0.
-    models = _model_order(completed)
-    colors = _colors_for(models)
-
-    stats = summarize(wins, ["method", "board_style", "model"], ["game_length"])
-    se = stats["game_length_se"].fillna(0)
-    # Zero-based like `fig_game_length`: rounds are a magnitude, and cropping
-    # the axis to the data would inflate gaps of a round or two into cliffs.
-    top = float((stats["game_length_mean"] + se).max()) * 1.12
-
-    fig, axes = plt.subplots(
-        1, len(methods) or 1,
-        figsize=(FACET_WIDTH * max(len(methods), 1) * 1.15, FACET_HEIGHT),
-        sharey=True, squeeze=False,
-    )
-    # Wider than fig 3's dodge: the per-point n labels underneath need the room.
-    dodge = 0.13
-    for ax, method in zip(axes[0], methods):
-        for mi, model in enumerate(models):
-            line = stats[(stats["method"] == method) & (stats["model"] == model)]
-            line = line.set_index("board_style").reindex(styles)
-            offset = (mi - (len(models) - 1) / 2) * dodge
-            xs = [x + offset for x in range(len(styles))]
-            ax.errorbar(
-                xs,
-                line["game_length_mean"],
-                yerr=line["game_length_se"],
-                marker="o", capsize=3, linewidth=1.6, markersize=5,
-                color=colors[model], label=short_model(model),
-            )
-            annotate_n(
-                ax,
-                xs,
-                line["game_length_n"].fillna(0).to_numpy(),
-                y=top * 0.015,
-                fontsize=6.5,
-            )
-        ax.set_xticks(range(len(styles)))
-        ax.set_xticklabels(styles, rotation=45, ha="right", fontsize=8)
-        ax.set_title(method, fontsize=10)
-        ax.set_ylim(0, top)
-        ax.set_xlim(-0.5, len(styles) - 0.5)
-        ax.grid(axis="y", alpha=0.25, linewidth=0.5)
-        ax.set_axisbelow(True)
-
-    axes[0][0].set_ylabel("rounds to win")
-    fig.suptitle(
-        "Ambiguity ladder: rounds per win vs board style (SE bars) — won games only",
-        fontsize=12, y=1.09,
-    )
-    fig.text(0.5, 1.02, "number under each point = won games behind it",
-             ha="center", fontsize=8.5, color="#555555")
-    fig.legend(
-        handles=_legend({short_model(m): colors[m] for m in models}),
-        loc="upper center", bbox_to_anchor=(0.5, -0.02),
-        ncol=min(len(models), 4), frameon=False, fontsize=9,
-    )
-    fig.tight_layout()
-    return fig
 
 
 # --- 10. the codemaster x guesser grid ----------------------------------
@@ -709,13 +751,17 @@ def fig_pair_matrix(games: pd.DataFrame):
     crossing the guesser: reading down a column asks whether one guesser
     flatters every codemaster equally, and reading across a row asks whether a
     codemaster's skill survives a change of partner. The leading diagonal is
-    self-play.
+    self-play and is outlined, because "did the model do better with itself"
+    is a different question from the rest of the grid and should not have to be
+    found by counting.
 
     Cells are noisy by construction — a 4x4 grid splits a run sixteen ways, so
-    each cell holds a sixteenth of the games and resolves only large gaps. The
-    row and column means in the margins are the numbers to read; an individual
-    cell running hot or cold is usually not evidence. Every cell prints its own
-    n so that is visible rather than implied.
+    each cell holds a sixteenth of the games. The margins are the numbers to
+    read; an individual cell running hot or cold is usually not evidence. Both
+    are drawn: the margin means come from the underlying games, not from
+    averaging the four cell means, so an unbalanced run (M4 pooled with M5,
+    where only two of the four models play) still reports each model's true
+    mean rather than one that silently reweights its partners.
     """
     completed = games[games["completed"]]
     if completed.empty or not _varies(completed, "guesser_model"):
@@ -727,11 +773,12 @@ def fig_pair_matrix(games: pd.DataFrame):
 
     codemasters = _level_order(completed, "model")
     guessers = _level_order(completed, "guesser_model")
+    margin = len(guessers), len(codemasters)  # x, y of the margin strip
 
     fig, axes = plt.subplots(
         1,
         len(metrics),
-        figsize=(FACET_WIDTH * 1.5 * len(metrics), FACET_HEIGHT * 1.25),
+        figsize=(FACET_WIDTH * 1.7 * len(metrics), FACET_HEIGHT * 1.45),
         squeeze=False,
     )
     for ax, (metric, label, cmap) in zip(axes[0], metrics):
@@ -743,7 +790,7 @@ def fig_pair_matrix(games: pd.DataFrame):
         ).reindex(index=codemasters, columns=guessers)
 
         image = ax.imshow(cell.to_numpy(), cmap=cmap, aspect="auto")
-        fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
+        fig.colorbar(image, ax=ax, fraction=0.046, pad=0.12)
 
         for r in range(len(codemasters)):
             for c in range(len(guessers)):
@@ -759,181 +806,79 @@ def fig_pair_matrix(games: pd.DataFrame):
                     color="white" if norm < 0.55 else "black",
                 )
 
-        ax.set_xticks(range(len(guessers)))
-        ax.set_xticklabels([short_model(g) for g in guessers], rotation=30, ha="right",
-                           fontsize=8)
-        ax.set_yticks(range(len(codemasters)))
-        ax.set_yticklabels([short_model(m) for m in codemasters], fontsize=8)
+        _draw_pair_margins(ax, completed, metric, codemasters, guessers, margin)
+
+        ax.set_xticks(list(range(len(guessers))) + [margin[0]])
+        ax.set_xticklabels(
+            [short_model(g) for g in guessers] + ["all guessers"],
+            rotation=30, ha="right", fontsize=8,
+        )
+        ax.set_yticks(list(range(len(codemasters))) + [margin[1]])
+        ax.set_yticklabels(
+            [short_model(m) for m in codemasters] + ["all codemasters"], fontsize=8
+        )
         ax.set_xlabel("guesser")
         ax.set_ylabel("codemaster")
         ax.set_title(f"mean {label} per pair", fontsize=11)
 
     fig.suptitle(
         "Codemaster x Guesser — does the ranking survive a change of partner?",
-        fontsize=12,
+        fontsize=12, y=1.03,
+    )
+    fig.text(
+        0.5, 0.985,
+        "outlined = self-play; the margin strip is each model's mean over all "
+        "its partners, taken from the games rather than from the cell means",
+        ha="center", fontsize=8.5, color="#555555",
     )
     fig.tight_layout()
     return fig
 
 
-# The floors are a designed ladder, so they get a ramp rather than the
-# categorical model palette: free is neutral, and the numeric floors darken as
-# they tighten.
-_FREE_COLOR = "#90a4ae"
-_FLOOR_RAMP = ("#4db6ac", "#00897b", "#00695c", "#004d40")
+def _draw_pair_margins(ax, completed, metric, codemasters, guessers, margin):
+    """The row and column means, in a strip outside the grid.
 
-# A point on the clue-count-by-round figure needs this many rounds behind it to
-# be drawn. Late rounds only exist in the games that ran long, so without a
-# floor every panel ends on a tail traced by one or two games.
-MIN_ROUNDS_PER_POINT = 5
-
-
-def count_floor_order(values: Iterable) -> list:
-    """`free` first, then the numeric floors in numeric order.
-
-    Plain `sorted()` is string order, which puts `min10` between `free` and
-    `min2` and draws the ladder out of sequence. Unrecognised labels sort last
-    rather than raising, so an older run with a hand-edited arm still plots.
+    Taken by grouping the games, not by averaging the row of cell means: those
+    two agree only when every cell holds the same number of games, and a pooled
+    or partially-run design breaks that. The strip is drawn as plain text on a
+    neutral background rather than as more heatmap, so it cannot be misread as
+    another pair.
     """
-    def key(label):
-        text = str(label)
-        if text == "free":
-            return (0, 0, "")
-        if text.startswith("min") and text[3:].isdigit():
-            return (1, int(text[3:]), "")
-        return (2, 0, text)
+    from matplotlib.patches import Rectangle
 
-    return sorted({str(v) for v in values}, key=key)
+    margin_x, margin_y = margin
+    ax.set_xlim(-0.5, margin_x + 0.5)
+    ax.set_ylim(margin_y + 0.5, -0.5)
 
+    rows = completed.groupby("model")[metric].agg(["mean", "count"]).reindex(codemasters)
+    cols = completed.groupby("guesser_model")[metric].agg(["mean", "count"]).reindex(guessers)
+    overall = completed[metric].agg(["mean", "count"])
 
-def _floor_levels(df: pd.DataFrame) -> list:
-    """The clue-count floors this frame can actually contrast."""
-    if "count_constraint" not in df.columns:
-        return []
-    return count_floor_order(df["count_constraint"].dropna().unique())
+    def strip(x, y, stat):
+        ax.add_patch(Rectangle((x - 0.5, y - 0.5), 1, 1, facecolor="#eceff1",
+                               edgecolor="white", linewidth=1.0, zorder=2))
+        if pd.isna(stat["mean"]):
+            return
+        ax.text(x, y, f"{stat['mean']:.2f}\nn={int(stat['count'])}",
+                ha="center", va="center", fontsize=7.5, color="#263238", zorder=3)
 
+    for r, model in enumerate(codemasters):
+        strip(margin_x, r, rows.loc[model])
+    for c, guesser in enumerate(guessers):
+        strip(c, margin_y, cols.loc[guesser])
+    strip(margin_x, margin_y, overall)
 
-def _floor_colors(floors: Sequence) -> dict:
-    numeric = [f for f in floors if f != "free"]
-    colors = {"free": _FREE_COLOR}
-    for i, floor in enumerate(numeric):
-        colors[floor] = _FLOOR_RAMP[i % len(_FLOOR_RAMP)]
-    return colors
-
-
-# --- 11. win rate by clue-count floor ------------------------------------
-
-
-def fig_win_rate_by_count_floor(games: pd.DataFrame):
-    """Does forcing a bigger clue win more games?
-
-    The floor is the x-axis rather than a facet, because it is an *assigned*
-    treatment and the ladder is meant to be read left to right. Every floor
-    plays the same boards with the same models, so board luck cancels across
-    the ladder in a way it never does across board style.
-
-    Intervals are Wilson, not Wald: a cell that went 4-for-4 has a Wald SE of
-    exactly 0, which draws as certainty.
-    """
-    completed = games[games["completed"]]
-    floors = _floor_levels(completed)
-    if len(floors) < 2 or completed.empty:
-        return None
-
-    models = _model_order(completed)
-    colors = _colors_for(models)
-
-    def draw(ax, subset):
-        stats = summarize(
-            subset, ["count_constraint", "model"], ["is_win"], proportions=["is_win"]
-        ).set_index(["count_constraint", "model"])
-        series, errors, counts = {}, {}, {}
-        for model in models:
-            rows = stats.reindex([(floor, model) for floor in floors])
-            mean = rows["is_win_mean"].fillna(0.0)
-            label = short_model(model)
-            series[label] = mean.to_numpy()
-            errors[label] = [
-                (mean - rows["is_win_lo"].fillna(mean)).clip(lower=0).to_numpy(),
-                (rows["is_win_hi"].fillna(mean) - mean).clip(lower=0).to_numpy(),
-            ]
-            counts[label] = rows["n"].fillna(0).to_numpy()
-
-        placed = _grouped_bars(ax, floors, series, {short_model(m): colors[m] for m in models},
-                               errors=errors)
-        for label, xs in placed.items():
-            annotate_n(ax, xs, counts[label], y=1.02, fontsize=6.5)
-        ax.set_ylim(0, 1.14)
-
-    return facet_by_style(
-        completed,
-        draw,
-        title="Win rate by clue-count floor (Wilson 95% bars) — completed games only",
-        ylabel="win rate",
-        subtitle="number above each bar = completed games behind that bar",
-        legend_handles=_legend({short_model(m): colors[m] for m in models}),
-    )
+    # Self-play: the same model in both seats. Outlined rather than coloured so
+    # it does not compete with the metric the colour is carrying.
+    for r, model in enumerate(codemasters):
+        if model in guessers:
+            ax.add_patch(Rectangle(
+                (guessers.index(model) - 0.5, r - 0.5), 1, 1,
+                fill=False, edgecolor="white", linewidth=2.2, zorder=4,
+            ))
 
 
-# --- 12. game length by clue-count floor ---------------------------------
-
-
-def fig_game_length_by_count_floor(games: pd.DataFrame):
-    """How long a game runs under each floor, split by outcome.
-
-    Split rather than pooled for the same reason as `fig_game_length`: a game
-    ends either when all nine targets are found or when the assassin is hit, so
-    a floor that shortens the average could be winning faster *or* dying
-    sooner, and one pooled box cannot tell those apart.
-
-    Models are pooled so a panel stays at six boxes; the per-model split is in
-    the `["model", "count_constraint"]` table, where it is not competing for
-    horizontal room.
-    """
-    completed = games[games["completed"]]
-    floors = _floor_levels(completed)
-    if len(floors) < 2 or completed.empty:
-        return None
-
-    top = completed["game_length"].max()
-
-    def draw(ax, subset):
-        positions, counts = [], []
-        for xi, floor in enumerate(floors):
-            arm = subset[subset["count_constraint"] == floor]
-            for oi, outcome in enumerate(("win", "loss")):
-                values = arm[arm["outcome"] == outcome]["game_length"].dropna()
-                position = xi - 0.18 + 0.36 * oi
-                positions.append(position)
-                counts.append(len(values))
-                if values.empty:
-                    continue
-                box = ax.boxplot(
-                    values, positions=[position], widths=0.3, patch_artist=True,
-                    medianprops={"color": "black", "linewidth": 1.2},
-                    flierprops={"markersize": 3, "alpha": 0.5},
-                )
-                for patch in box["boxes"]:
-                    patch.set_facecolor(_OUTCOME_COLORS[outcome])
-                    patch.set_alpha(0.65)
-        ax.set_xticks(range(len(floors)))
-        ax.set_xticklabels(floors)
-        ax.set_xlim(-0.6, len(floors) - 0.4)
-        ax.set_ylim(0, top * 1.16)
-        # Wins and losses split each floor unevenly, so every box needs its own n.
-        annotate_n(ax, positions, counts, y=top * 1.04)
-
-    return facet_by_style(
-        completed,
-        draw,
-        title="Game length (rounds) by clue-count floor and outcome — completed games only",
-        ylabel="rounds",
-        subtitle="models pooled; number above each box = games in that box",
-        legend_handles=_legend({k: v for k, v in _OUTCOME_COLORS.items() if k != "failed"}),
-    )
-
-
-# --- 13. clue count over the course of a game ----------------------------
+# --- 11. clue count over the course of a game ----------------------------
 
 
 def fig_count_by_round(rounds: pd.DataFrame):
@@ -1042,22 +987,25 @@ def fig_count_by_round(rounds: pd.DataFrame):
     return fig
 
 
+# The registry, in reading order. Figures that a run cannot support return
+# None and are skipped: the guesser grids need a crossed run, the floor grids
+# need more than one arm, and the pair matrix needs both.
 FIGURES = {
     "01_outcome_composition": lambda data: fig_outcome_composition(data.games),
     "02_game_length": lambda data: fig_game_length(data.games),
-    "03_ambiguity_ladder": lambda data: fig_ambiguity_ladder(data.games),
-    "04_stop_behaviour": lambda data: fig_stop_behaviour(data.rounds),
-    "05_intended_overlap": lambda data: fig_intended_overlap(data.rounds),
-    "06_ambition_vs_yield": lambda data: fig_ambition_vs_yield(data.rounds),
-    "07_dual_miss_lift": lambda data: fig_dual_miss_lift(
-        data.rounds, {k: v for board in data.boards.values() for k, v in board.items()}
+    "03_win_rate_by_floor": lambda data: fig_win_rate_grid(data.games, "count_constraint"),
+    "04_win_rate_by_guesser": lambda data: fig_win_rate_grid(data.games, "guesser_model"),
+    "05_outcome_mix_by_floor": lambda data: fig_outcome_grid(data.games, "count_constraint"),
+    "06_outcome_mix_by_guesser": lambda data: fig_outcome_grid(data.games, "guesser_model"),
+    "07_game_length_by_floor": lambda data: fig_game_length_grid(
+        data.games, "count_constraint"
     ),
-    "08_first_guess_lift": lambda data: fig_first_guess_lift(data.games),
-    "09_win_length_ladder": lambda data: fig_win_length_ladder(data.games),
+    "08_game_length_by_guesser": lambda data: fig_game_length_grid(
+        data.games, "guesser_model"
+    ),
+    "09_first_guess_vs_chance": lambda data: fig_first_guess_vs_chance(data.games),
     "10_pair_matrix": lambda data: fig_pair_matrix(data.games),
-    "11_win_rate_by_count_floor": lambda data: fig_win_rate_by_count_floor(data.games),
-    "12_game_length_by_count_floor": lambda data: fig_game_length_by_count_floor(data.games),
-    "13_count_by_round": lambda data: fig_count_by_round(data.rounds),
+    "11_count_by_round": lambda data: fig_count_by_round(data.rounds),
 }
 
 
@@ -1071,7 +1019,7 @@ def save_all(data, out_dir, dpi: int = 150) -> dict:
     saved = {}
     for name, build in FIGURES.items():
         fig = build(data)
-        if fig is None:  # e.g. no ambiguity data on a pre-style run
+        if fig is None:  # e.g. a fixed-guesser run has no pair grid to draw
             continue
         path = out_dir / f"{name}.png"
         fig.savefig(path, dpi=dpi, bbox_inches="tight")

@@ -126,6 +126,20 @@ def _stop_group(rounds: pd.DataFrame) -> list:
     return [_actor(rounds), "board_style"]
 
 
+def _stop_floor_group(rounds: pd.DataFrame) -> list | None:
+    """The stop taxonomy against the clue-count floor, when a run has one.
+
+    The floor is the treatment most directly aimed at stop behaviour: it sets
+    how many guesses the guesser is owed, which is the denominator an early
+    stop is early *against*. This grouping replaced the stacked-bar figure,
+    which pooled the floors and so could not show the one contrast that was
+    assigned rather than observed.
+    """
+    if not _varies(rounds, "count_constraint"):
+        return None
+    return [_actor(rounds), "count_constraint"]
+
+
 def _miss_group(rounds: pd.DataFrame) -> str:
     return _actor(rounds)
 
@@ -314,6 +328,22 @@ def build_report(data, figure_paths: dict, run_label: str) -> str:
             "codemaster's clue counts are the only thing shaping these rounds.",
         )
     )
+    floor_group = _stop_floor_group(rounds)
+    if floor_group:
+        lines.append(
+            _section(
+                "Stop behaviour — by clue-count floor",
+                _fmt(stop_class_table(rounds, floor_group, shares_only=True)),
+                "Shares only; the counts are in the table above. The floor sets "
+                "how many guesses the guesser is owed, so it is the assigned "
+                "treatment an early stop is early *against* — read "
+                "`early_stop_true_share` down the floors, not across the models. "
+                "Rounds where the codemaster named a count of 1 cannot contain an "
+                "early stop at all and land in `stopped_at_quota`, so a floor that "
+                "raises the count mechanically moves mass between those two "
+                "columns before any judgement is involved.",
+            )
+        )
     lines.append(
         _section(
             "Codemaster compliance and retries",
