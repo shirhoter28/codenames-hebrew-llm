@@ -582,6 +582,16 @@ def _build_game(row: dict, run_id: str, boards: dict, config: dict):
             for guess in raw.get("guess_sequence") or []
             if guess["role"] == "opponent"
         ),
+        # Always derived: no runner has ever logged it, and it is the other
+        # half of the "what did a miss cost" pair. Revealing a civilian ends
+        # the turn; revealing an opponent word ends the turn *and* advances
+        # the opposing team, so the two are not interchangeable.
+        "civilian_words_revealed": sum(
+            1
+            for raw in raw_rounds
+            for guess in raw.get("guess_sequence") or []
+            if guess["role"] == "civilian"
+        ),
         "terminal_error": row.get("terminal_error") or row.get("error"),
         # Written only by the parallel runner; absent on earlier runs.
         "started_at": row.get("started_at"),
@@ -924,6 +934,101 @@ def stop_class_table(
 
     out = pd.concat(blocks, axis=1)
     return out.drop(columns=["_all"]) if not group_cols else out
+
+
+# The factors a pair table can be cut by, each averaging over the other two.
+# Board style, prompt method and the clue-count floor are all *assigned*, and
+# every pair plays every level of all three, so a cut holds the pair grid
+# complete and only changes what is being averaged over.
+PAIR_STRATA = ("method", "count_constraint", "board_style")
+
+
+def pair_table(
+    games: pd.DataFrame, rounds: pd.DataFrame, group_cols: Sequence[str] = ()
+) -> pd.DataFrame:
+    """One row per codemaster x guesser pair, in the shape of Table I of
+    Stephenson, Sidji & Ronval.
+
+    The benchmark's own summary table, rebuilt on this run so the two can be
+    read side by side. Every column is per *pair*, because that is the unit the
+    paper reports and because a codemaster's numbers are not a property of the
+    codemaster alone — the guesser it was handed to moves all of them.
+
+    `group_cols` cuts the table by one of `PAIR_STRATA` and averages over the
+    rest. The pair grid stays complete either way: a run crosses every pair
+    with every level of every factor, so a cut re-weights what is averaged
+    rather than dropping rows.
+
+    Two departures from the paper, both forced by this design rather than
+    chosen:
+
+    - `games` and `rounds` are printed. The paper's cells all hold the same
+      number of games; ours do not, and a mean over 30 games should not be read
+      the same way as one over 500.
+    - `stop_early` and `stop_late` are over *eligible* rounds. A guesser cannot
+      stop before its first correct guess, so an early stop is impossible when
+      the clue named a count of 1; counting those rounds in the denominator
+      would deflate the rate for reasons that have nothing to do with the
+      guesser's judgement. `n_early_eligible` and `n_late_eligible` give the
+      denominators, and separate "never did it" from "never could".
+    """
+    group_cols = list(group_cols)
+    keys = group_cols + ["model", "guesser_model"]
+    completed = games[games["completed"]]
+    if completed.empty:
+        return pd.DataFrame(columns=keys)
+
+    # Rounds belonging to a game that never played out are dropped with it:
+    # a game abandoned mid-way contributes clue counts from a board its pair
+    # never finished, and the paper's row is over completed games.
+    played = rounds.merge(
+        completed[GAME_KEY].drop_duplicates(), on=GAME_KEY, how="inner"
+    )
+
+    by_game = completed.groupby(keys, dropna=False, observed=True)
+    out = pd.DataFrame(index=by_game.size().index)
+    out["games"] = by_game.size()
+    out["length_mean"] = by_game["game_length"].mean()
+    out["length_median"] = by_game["game_length"].median()
+    out["length_min"] = by_game["game_length"].min()
+    out["length_sd"] = by_game["game_length"].std(ddof=1)
+    out["loss_rate"] = by_game["is_loss"].mean()
+
+    # The paper's "Mean (without loss)": a lost game is short because it ended
+    # on the assassin, so pooling the two makes a pair that dies early look
+    # efficient.
+    wins = completed[completed["is_win"] == 1.0]
+    if not wins.empty:
+        out["length_mean_wins"] = wins.groupby(
+            keys, dropna=False, observed=True
+        )["game_length"].mean()
+    else:
+        out["length_mean_wins"] = float("nan")
+
+    for column, label in (
+        ("opponent_words_revealed", "opponent"),
+        ("civilian_words_revealed", "civilian"),
+    ):
+        if column not in completed.columns:
+            continue
+        out[f"{label}_mean"] = by_game[column].mean()
+        out[f"{label}_sd"] = by_game[column].std(ddof=1)
+
+    by_round = played.groupby(keys, dropna=False, observed=True)
+    out["rounds"] = by_round.size()
+    for column, label in (("count", "clue_count"), ("n_guesses", "guesses")):
+        if column not in played.columns:
+            continue
+        out[f"{label}_mean"] = by_round[column].mean()
+        out[f"{label}_sd"] = by_round[column].std(ddof=1)
+
+    for column, label in (("is_early_stop", "stop_early"), ("is_bonus_taken", "stop_late")):
+        if column not in played.columns:
+            continue
+        out[f"{label}_rate"] = by_round[column].mean()
+        out[f"n_{label.split('_')[1]}_eligible"] = by_round[column].count()
+
+    return out.reset_index()
 
 
 def compliance_table(games: pd.DataFrame, group_cols: Sequence[str]) -> pd.DataFrame:
