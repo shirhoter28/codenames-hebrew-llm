@@ -157,10 +157,15 @@ def _role_compliance(games: pd.DataFrame, group_col: str, role: str) -> pd.DataF
 
 
 def summarize_panels(panels: pd.DataFrame) -> pd.DataFrame:
-    """Collapse the per-panel agreement rows to one row per board style."""
+    """Collapse the per-panel agreement rows to one row per board style.
+
+    `n_distinct_clues` is deliberately excluded: it counts every draw in the
+    panel, including a model's own repeats of itself, so it is not a
+    cross-codemaster measure and does not belong in this table.
+    """
     return summarize(
         panels, ["board_style"],
-        ["n_distinct_clues", "pairwise_clue_agreement", "pairwise_target_jaccard"],
+        ["pairwise_clue_agreement", "pairwise_target_jaccard"],
     )
 
 
@@ -414,9 +419,18 @@ def build_report(data, figure_paths: dict, run_label: str) -> str:
                 "cells where a model gave one clue every time; `self_jaccard_mean` is "
                 "the mean overlap of the words it aimed at. A low unanimity beside a "
                 "high Jaccard means unstable phrasing but a stable strategy. "
-                "**Temperature is each provider's default and is neither set nor "
-                "recorded**, so this is self-consistency at default sampling "
-                "settings, not at a controlled temperature.",
+                "**Two confounds, and the second may dominate.** Temperature is each provider's "
+                "default and is neither set nor recorded, so this is self-consistency at default "
+                "sampling settings rather than at a controlled temperature. More seriously, a "
+                "rejected clue is retried with a correction appended to the prompt "
+                "(`experiment.py`), so the prompt is byte-identical only across draws accepted on "
+                "the first attempt. Rejections per game run 5.28 for qwen, 1.85 for gpt-4o-mini, "
+                "0.82 for gemini and 0.65 for llama — the exact inverse of the unanimity order "
+                "below. Restricting to games with no codemaster rejection reverses the ranking "
+                "entirely (qwen 0.000 to 0.793, gemini 0.285 to 0.473), though that subset is "
+                "itself selected toward each model's compliant games. Read these numbers as "
+                "self-consistency entangled with compliance, not as a clean measure of "
+                "clue-finding stability.",
             )
         )
         panels = panel_agreement(rounds)

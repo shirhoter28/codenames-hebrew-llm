@@ -1073,7 +1073,10 @@ def fig_self_consistency_grid(rounds: pd.DataFrame, row_col: str):
     byte-identical prompt.
     """
     cells = _agreement.self_consistency(rounds)
-    if cells.empty:
+    # A cell with fewer than 2 draws cannot score as unanimous or not, so a
+    # grid built entirely from such cells would show scores with no evidence
+    # behind them.
+    if cells.empty or cells["n_draws"].max() < 2:
         return None
     models, methods = _model_order(cells), _method_order(cells)
     colors = _colors_for(models)

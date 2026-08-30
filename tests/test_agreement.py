@@ -132,6 +132,17 @@ def test_summary_groups_cells_by_model(cell_rounds):
     assert "is_unanimous_mean" in out.columns
 
 
+def test_summary_excludes_single_draw_cells(cell_rounds):
+    # One draw cannot agree or disagree with anything, so a 1-draw cell must
+    # not be counted as is_unanimous=1.0. Trim alpha down to a single round-1
+    # draw and it should drop out of the summary entirely.
+    from codenames_heb.agreement import self_consistency_summary
+    trimmed = cell_rounds.drop(cell_rounds[cell_rounds["model"] == "v/alpha"].index[:3])
+    out = self_consistency_summary(trimmed)
+
+    assert set(out["model"]) == {"v/beta"}
+
+
 def test_panel_agreement_excludes_same_codemaster_pairs(cell_rounds):
     # alpha is unanimous (4 identical clues), beta gives 4 different ones, and
     # no alpha clue equals a beta clue. Counting alpha's 6 self-pairs would
@@ -201,6 +212,37 @@ def test_word_consensus_never_flags_a_non_target(cell_rounds, boards):
 
     assert civilian["n_picks"] == 0
     assert civilian["is_consensus_hard"] == 0.0
+
+
+def test_word_consensus_skips_a_board_with_no_roles_key(cell_rounds):
+    # Pre-style runs wrote boards.json with no `roles` key at all. The
+    # `is_dual` access already guards this with `.get(...) or {}`; the roles
+    # access must do the same instead of raising KeyError.
+    roleless_boards = {("natural", 0): {"is_dual": {"א": False}}}
+
+    out = word_consensus(cell_rounds, roleless_boards)
+
+    assert out.empty
+
+
+def test_word_consensus_skips_an_absent_board(cell_rounds, boards):
+    # A panel whose board key is missing entirely (not merely roles-less)
+    # must also be skipped rather than raising.
+    out = word_consensus(cell_rounds, {})
+
+    assert out.empty
+
+
+def test_word_consensus_group_cols_without_board_seed_is_empty_not_wrong(cell_rounds, boards):
+    # boards is keyed by (board_style, board_seed). Overriding group_cols to
+    # drop board_seed means every lookup key becomes (style, None), which is
+    # never in `boards`, so every panel is skipped. This must come back
+    # empty rather than silently matching the wrong board.
+    out = word_consensus(
+        cell_rounds, boards, group_cols=["board_style", "method", "count_constraint"]
+    )
+
+    assert out.empty
 
 
 def test_consensus_hard_crosses_with_the_dual_flag(cell_rounds, boards):

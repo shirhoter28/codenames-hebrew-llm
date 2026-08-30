@@ -607,3 +607,13 @@ def test_agreement_grids_are_skipped_when_the_row_factor_has_one_level(agreement
 
     assert plots.fig_self_consistency_grid(single, "count_constraint") is None
     assert plots.fig_cross_model_agreement_grid(single, "count_constraint") is None
+
+
+def test_self_consistency_grid_is_none_when_every_cell_has_one_draw(agreement_rounds):
+    # Both row levels ("free" and "min2") survive this filter, so this is not
+    # the one-row-factor skip above — it is every replicate cell being left
+    # with a single draw, which cannot score as unanimous or not.
+    single_draw = agreement_rounds[agreement_rounds["guesser_model"] == "g0"]
+    assert single_draw["count_constraint"].nunique() >= 2
+
+    assert plots.fig_self_consistency_grid(single_draw, "count_constraint") is None

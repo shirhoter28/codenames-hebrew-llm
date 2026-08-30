@@ -108,9 +108,20 @@ _CONSISTENCY_METRICS = [
 ]
 
 
-def self_consistency_summary(rounds: pd.DataFrame, group_cols=("model",)) -> pd.DataFrame:
-    """Aggregate the cells. `is_unanimous` carries a Wilson interval."""
+def self_consistency_summary(rounds: pd.DataFrame, group_cols=("model",),
+                             min_draws: int = 2) -> pd.DataFrame:
+    """Aggregate the cells. `is_unanimous` carries a Wilson interval.
+
+    Cells below `min_draws` are excluded first. One draw cannot agree or
+    disagree with anything, so a 1-draw cell scoring is_unanimous=1.0 is
+    absence of evidence, not evidence of consistency — and the bias runs
+    adverse: a codemaster that fails round 1 more often loses more draws,
+    which then inflates its measured unanimity.
+    """
     cells = self_consistency(rounds)
+    if cells.empty:
+        return cells
+    cells = cells[cells["n_draws"] >= min_draws]
     if cells.empty:
         return cells
     return summarize(cells, list(group_cols), _CONSISTENCY_METRICS,
@@ -139,6 +150,9 @@ def panel_agreement(rounds: pd.DataFrame, group_cols=None) -> pd.DataFrame:
             **_keys_to_dict(group_cols, keys),
             "n_draws": len(draws),
             "n_codemasters": len({m for m, _, _ in draws}),
+            # Counts ALL draws in the panel, including a model's own repeats
+            # of itself — NOT restricted to cross-codemaster pairs like the
+            # metrics below. Do not report this as a cross-model quantity.
             "n_distinct_clues": len(set(clues)),
             "n_cross_pairs": len(pairs),
             "pairwise_clue_agreement": sum(a[1] == b[1] for a, b in pairs) / len(pairs),
@@ -164,8 +178,13 @@ def word_consensus(rounds: pd.DataFrame, boards: dict, group_cols=None) -> pd.Da
         board = boards.get((key.get("board_style"), key.get("board_seed")))
         if not board:
             continue
+        # Pre-style runs wrote boards.json with no `roles` key at all, same as
+        # the `is_dual` access below already guards against.
+        roles = board.get("roles") or {}
+        if not roles:
+            continue
         picks = Counter(word for target_set in sub["target_set"] for word in target_set)
-        for word, role in board["roles"].items():
+        for word, role in roles.items():
             records.append({
                 **key,
                 "word": word,
@@ -202,6 +221,15 @@ def rank_panels(agreement: pd.DataFrame, by: str = "n_distinct_clues",
 
     This is what makes case selection principled rather than anecdotal, and it
     doubles as the stratified sampling frame for later labelling work.
+
+    The default key, `n_distinct_clues`, counts ALL draws in a panel,
+    including a model's own repeats of itself — it is not restricted to
+    cross-codemaster pairs. A panel can therefore rank high because one
+    codemaster was unstable across its own draws, not because the codemasters
+    disagreed with each other. A caller wanting a purely cross-model ranking
+    can pass `by="pairwise_clue_agreement"` instead, but note that metric
+    sorts descending here too, so it ranks the most-AGREEING panels first,
+    not the most-disagreed.
     """
     if agreement.empty or by not in agreement.columns:
         return agreement
