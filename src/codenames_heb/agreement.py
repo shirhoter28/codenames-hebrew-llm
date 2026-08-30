@@ -115,3 +115,35 @@ def self_consistency_summary(rounds: pd.DataFrame, group_cols=("model",)) -> pd.
         return cells
     return summarize(cells, list(group_cols), _CONSISTENCY_METRICS,
                      proportions=["is_unanimous"])
+
+
+def panel_agreement(rounds: pd.DataFrame, group_cols=None) -> pd.DataFrame:
+    """One row per board panel: do the codemasters converge?
+
+    Pairs are restricted to DIFFERENT codemasters. Including same-codemaster
+    pairs would fold self-consistency into the agreement number and inflate it
+    for exactly the models that are most stable.
+    """
+    group_cols = list(group_cols or PANEL_KEY)
+    first = first_rounds(rounds)
+    records = []
+    for keys, sub in first.groupby(group_cols, dropna=False, observed=True):
+        draws = list(zip(sub["model"], sub["clue_norm"], sub["target_set"]))
+        pairs = [(a, b) for a, b in combinations(draws, 2) if a[0] != b[0]]
+        if not pairs:
+            continue
+        overlaps = [s for s in (_jaccard(a[2], b[2]) for a, b in pairs) if s is not None]
+        clues = [clue for _, clue, _ in draws]
+        modal_clue, modal_n = Counter(clues).most_common(1)[0]
+        records.append({
+            **_keys_to_dict(group_cols, keys),
+            "n_draws": len(draws),
+            "n_codemasters": len({m for m, _, _ in draws}),
+            "n_distinct_clues": len(set(clues)),
+            "n_cross_pairs": len(pairs),
+            "pairwise_clue_agreement": sum(a[1] == b[1] for a, b in pairs) / len(pairs),
+            "pairwise_target_jaccard": (sum(overlaps) / len(overlaps)) if overlaps else None,
+            "consensus_clue": modal_clue,
+            "consensus_share": modal_n / len(clues),
+        })
+    return pd.DataFrame(records)

@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 
-from codenames_heb.agreement import CELL_KEY, PANEL_KEY, first_rounds, normalize_clue
+from codenames_heb.agreement import CELL_KEY, PANEL_KEY, first_rounds, normalize_clue, panel_agreement
 
 
 def test_normalize_strips_niqqud():
@@ -127,3 +127,38 @@ def test_summary_groups_cells_by_model(cell_rounds):
 
     assert set(out["model"]) == {"v/alpha", "v/beta"}
     assert "is_unanimous_mean" in out.columns
+
+
+def test_panel_agreement_excludes_same_codemaster_pairs(cell_rounds):
+    # alpha is unanimous (4 identical clues), beta gives 4 different ones, and
+    # no alpha clue equals a beta clue. Counting alpha's 6 self-pairs would
+    # report agreement 6/28 instead of the true cross-model 0/16.
+    panel = panel_agreement(cell_rounds).iloc[0]
+
+    assert panel["n_draws"] == 8
+    assert panel["n_codemasters"] == 2
+    assert panel["n_cross_pairs"] == 16
+    assert panel["pairwise_clue_agreement"] == 0.0
+
+
+def test_panel_agreement_counts_a_shared_clue(cell_rounds):
+    agreed = cell_rounds.copy()
+    agreed.loc[agreed["model"] == "v/beta", "clue"] = "בית"
+    panel = panel_agreement(agreed).iloc[0]
+
+    assert panel["pairwise_clue_agreement"] == 1.0
+    assert panel["consensus_clue"] == "בית"
+    assert panel["consensus_share"] == 1.0
+
+
+def test_panel_agreement_reports_target_overlap(cell_rounds):
+    # alpha aims at {א, ב}, beta at {א}: Jaccard = 1/2 on every cross pair.
+    panel = panel_agreement(cell_rounds).iloc[0]
+
+    assert panel["pairwise_target_jaccard"] == 0.5
+
+
+def test_panel_agreement_skips_a_single_codemaster_panel(cell_rounds):
+    solo = cell_rounds[cell_rounds["model"] == "v/alpha"]
+
+    assert panel_agreement(solo).empty
