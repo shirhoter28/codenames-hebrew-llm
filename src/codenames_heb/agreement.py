@@ -59,3 +59,59 @@ def first_rounds(rounds: pd.DataFrame) -> pd.DataFrame:
         lambda t: frozenset(t) if isinstance(t, (list, tuple, set)) else frozenset()
     )
     return first
+
+
+def _jaccard(left: frozenset, right: frozenset):
+    union = left | right
+    return len(left & right) / len(union) if union else None
+
+
+def mean_pairwise_jaccard(sets) -> float | None:
+    """Mean overlap of the target sets across draws.
+
+    The load-bearing metric: it separates two instabilities that
+    `n_distinct_clues` conflates. A model that varies its *wording* while
+    aiming at the same words is behaving reasonably; one that varies *which
+    words it aims at* has an unstable strategy.
+    """
+    scores = [s for s in (_jaccard(a, b) for a, b in combinations(sets, 2)) if s is not None]
+    return sum(scores) / len(scores) if scores else None
+
+
+def _keys_to_dict(columns, keys) -> dict:
+    """groupby hands back a scalar for a single column and a tuple for many."""
+    return dict(zip(columns, keys if isinstance(keys, tuple) else (keys,)))
+
+
+def self_consistency(rounds: pd.DataFrame) -> pd.DataFrame:
+    """One row per replicate cell: does this model repeat itself?"""
+    first = first_rounds(rounds)
+    records = []
+    for keys, sub in first.groupby(CELL_KEY, dropna=False, observed=True):
+        clues, sets = list(sub["clue_norm"]), list(sub["target_set"])
+        records.append({
+            **_keys_to_dict(CELL_KEY, keys),
+            "n_draws": len(clues),
+            "n_distinct_clues": len(set(clues)),
+            "is_unanimous": float(len(set(clues)) == 1),
+            "modal_share": Counter(clues).most_common(1)[0][1] / len(clues),
+            "n_distinct_target_sets": len(set(sets)),
+            "target_set_modal_share": Counter(sets).most_common(1)[0][1] / len(sets),
+            "self_jaccard": mean_pairwise_jaccard(sets),
+        })
+    return pd.DataFrame(records)
+
+
+_CONSISTENCY_METRICS = [
+    "n_draws", "n_distinct_clues", "is_unanimous", "modal_share",
+    "n_distinct_target_sets", "self_jaccard",
+]
+
+
+def self_consistency_summary(rounds: pd.DataFrame, group_cols=("model",)) -> pd.DataFrame:
+    """Aggregate the cells. `is_unanimous` carries a Wilson interval."""
+    cells = self_consistency(rounds)
+    if cells.empty:
+        return cells
+    return summarize(cells, list(group_cols), _CONSISTENCY_METRICS,
+                     proportions=["is_unanimous"])

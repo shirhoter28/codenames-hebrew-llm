@@ -68,3 +68,62 @@ def test_keys_name_the_two_units():
     # board, holding method and floor fixed so it stays a model contrast.
     assert CELL_KEY == ["board_style", "board_seed", "model", "method", "count_constraint"]
     assert PANEL_KEY == ["board_style", "board_seed", "method", "count_constraint"]
+
+
+def test_jaccard_is_one_on_identical_sets():
+    from codenames_heb.agreement import mean_pairwise_jaccard
+    sets = [frozenset({"א", "ב"})] * 3
+    assert mean_pairwise_jaccard(sets) == 1.0
+
+
+def test_jaccard_is_zero_on_disjoint_sets():
+    from codenames_heb.agreement import mean_pairwise_jaccard
+    assert mean_pairwise_jaccard([frozenset({"א"}), frozenset({"ב"})]) == 0.0
+
+
+def test_jaccard_is_undefined_for_a_single_draw():
+    from codenames_heb.agreement import mean_pairwise_jaccard
+    # One draw has no pair, so there is nothing to agree with.
+    assert mean_pairwise_jaccard([frozenset({"א"})]) is None
+
+
+def test_unanimous_cell_scores_one_distinct_clue(cell_rounds):
+    from codenames_heb.agreement import self_consistency
+    cells = self_consistency(cell_rounds)
+    alpha = cells[cells["model"] == "v/alpha"].iloc[0]
+
+    assert alpha["n_draws"] == 4
+    assert alpha["n_distinct_clues"] == 1
+    assert alpha["is_unanimous"] == 1.0
+    assert alpha["modal_share"] == 1.0
+
+
+def test_all_different_cell_scores_four_distinct_clues(cell_rounds):
+    from codenames_heb.agreement import self_consistency
+    cells = self_consistency(cell_rounds)
+    beta = cells[cells["model"] == "v/beta"].iloc[0]
+
+    assert beta["n_distinct_clues"] == 4
+    assert beta["is_unanimous"] == 0.0
+    assert beta["modal_share"] == 0.25
+    # Different wording, identical aim: the strategy is stable even though the
+    # clue is not. This is the distinction n_distinct_clues cannot make.
+    assert beta["self_jaccard"] == 1.0
+
+
+def test_short_cell_is_scored_over_the_draws_it_has(cell_rounds):
+    from codenames_heb.agreement import self_consistency
+    trimmed = cell_rounds.drop(cell_rounds[cell_rounds["model"] == "v/alpha"].index[:2])
+    cells = self_consistency(trimmed)
+    alpha = cells[cells["model"] == "v/alpha"].iloc[0]
+
+    assert alpha["n_draws"] == 2
+    assert alpha["modal_share"] == 1.0
+
+
+def test_summary_groups_cells_by_model(cell_rounds):
+    from codenames_heb.agreement import self_consistency_summary
+    out = self_consistency_summary(cell_rounds)
+
+    assert set(out["model"]) == {"v/alpha", "v/beta"}
+    assert "is_unanimous_mean" in out.columns
