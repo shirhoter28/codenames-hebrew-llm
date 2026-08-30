@@ -412,12 +412,46 @@ def test_count_by_round_drops_points_below_the_minimum_rounds(floor_rounds):
     assert max(max(line.get_xdata()) for line in _lines(fig.axes[0], "-")) == 3
 
 
-def test_count_by_round_is_skipped_on_a_run_with_one_floor(floor_rounds):
-    # Every run before M4 has a single arm; a one-line "comparison" implies a
-    # contrast the run cannot make.
-    single = floor_rounds[floor_rounds["count_constraint"] == "free"]
+def test_count_by_round_still_draws_on_a_single_arm_run(floor_rounds):
+    """Unlike the floor *grids*, this figure's subject is how ambition decays
+    over a game, not the contrast between arms — a run that fixed the floor
+    still has that shape to show, as one line per panel."""
+    single = floor_rounds[floor_rounds["count_constraint"] == "min2"]
 
-    assert plots.fig_count_by_round(single) is None
+    fig = plots.fig_count_by_round(single)
+
+    assert fig is not None
+    assert all(len(_lines(ax, "-")) == 1 for ax in fig.axes)
+    # The arm has a name, so it keeps its key.
+    assert fig.legends
+
+
+def test_count_by_round_draws_a_run_that_predates_the_floors(floor_rounds):
+    """Pre-M4 runs carry no `count_constraint` at all. One implicit line, and
+    no legend — a key naming a single unnamed line says nothing."""
+    older = floor_rounds.drop(columns=["count_constraint", "required_count"])
+
+    fig = plots.fig_count_by_round(older)
+
+    assert fig is not None
+    assert all(len(_lines(ax, "-")) == 1 for ax in fig.axes)
+    assert not fig.legends
+
+
+def test_count_by_round_survives_the_report_for_a_single_arm_run(
+    tmp_path, grid_games, floor_rounds
+):
+    """The M5 top-up fixed the floor at min2. The figure went missing from that
+    run's folder because the guard was the grids', not this figure's."""
+    class Data:
+        pass
+
+    data = Data()
+    data.games = grid_games[grid_games["count_constraint"] == "min2"]
+    data.rounds = floor_rounds[floor_rounds["count_constraint"] == "min2"]
+    data.boards = {}
+
+    assert "11_count_by_round" in plots.save_all(data, tmp_path)
 
 
 def test_save_all_writes_the_stratified_grids(tmp_path, grid_games, floor_rounds):

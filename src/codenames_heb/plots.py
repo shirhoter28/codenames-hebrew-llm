@@ -896,15 +896,26 @@ def fig_count_by_round(rounds: pd.DataFrame):
     Board style is collapsed here. Every style plays every floor, so the
     contrast this figure draws survives the pooling; keeping style as a facet
     as well would put twelve panels on one row.
-    """
-    floors = _floor_levels(rounds)
-    if len(floors) < 2 or rounds.empty:
-        return None
 
-    models = _model_order(rounds)
+    Unlike the floor *grids*, this figure draws on a single-arm run too. The
+    grids exist to contrast the floors and collapse to a bar when there is only
+    one; this one's subject is how ambition decays over a game, and a run that
+    fixed the floor still has that shape to show — it just shows it as one line
+    per panel. A run predating the floors gets a single unlabelled line.
+    """
+    if rounds.empty:
+        return None
+    floors = _floor_levels(rounds)
+    if floors:
+        frame = rounds
+    else:
+        # Pre-M4: no arm was assigned, so there is one implicit line to draw.
+        frame, floors = rounds.assign(count_constraint="all"), ["all"]
+
+    models = _model_order(frame)
     colors = _floor_colors(floors)
     stats = summarize(
-        rounds, ["model", "count_constraint", "round"], ["count", "required_count"]
+        frame, ["model", "count_constraint", "round"], ["count", "required_count"]
     )
     stats = stats[stats["count_n"] >= MIN_ROUNDS_PER_POINT]
     if stats.empty:
@@ -968,8 +979,11 @@ def fig_count_by_round(rounds: pd.DataFrame):
         ax.set_xlabel("round", fontsize=9)
 
     axes[0][0].set_ylabel("clue count (ambition)")
+    ladder = len(floors) > 1
     fig.suptitle(
-        "Clue ambition by turn number and clue-count floor (SE band)",
+        "Clue ambition by turn number and clue-count floor (SE band)"
+        if ladder
+        else "Clue ambition by turn number (SE band)",
         fontsize=12, y=1.10,
     )
     fig.text(
@@ -979,11 +993,14 @@ def fig_count_by_round(rounds: pd.DataFrame):
         f"{MIN_ROUNDS_PER_POINT} rounds dropped)",
         ha="center", fontsize=8.5, color="#555555",
     )
-    fig.legend(
-        handles=_legend({floor: colors[floor] for floor in floors}),
-        loc="upper center", bbox_to_anchor=(0.5, -0.02),
-        ncol=min(len(floors), 4), frameon=False, fontsize=9,
-    )
+    # One line needs no key telling the reader which line it is — unless the
+    # run named its single arm, in which case the name is worth carrying.
+    if floors != ["all"]:
+        fig.legend(
+            handles=_legend({floor: colors[floor] for floor in floors}),
+            loc="upper center", bbox_to_anchor=(0.5, -0.02),
+            ncol=min(len(floors), 4), frameon=False, fontsize=9,
+        )
     fig.tight_layout()
     return fig
 
