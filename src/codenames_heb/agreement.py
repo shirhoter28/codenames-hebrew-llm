@@ -41,3 +41,21 @@ def normalize_clue(text) -> str:
     if not isinstance(text, str):
         return ""
     return _PUNCT.sub("", _NIQQUD.sub("", text)).translate(_FINALS)
+
+
+# A replicate cell holds one model's draws from one identical prompt.
+CELL_KEY = ["board_style", "board_seed", "model", "method", "count_constraint"]
+# A panel pools the codemasters on one board. Method and floor are held fixed
+# so a panel is a model contrast and not a method contrast; pass different
+# columns to pool them.
+PANEL_KEY = ["board_style", "board_seed", "method", "count_constraint"]
+
+
+def first_rounds(rounds: pd.DataFrame) -> pd.DataFrame:
+    """Round 1 only, with the comparison keys attached."""
+    first = rounds[rounds["round"] == 1].copy()
+    first["clue_norm"] = first["clue"].map(normalize_clue)
+    first["target_set"] = first["intended_targets"].map(
+        lambda t: frozenset(t) if isinstance(t, (list, tuple, set)) else frozenset()
+    )
+    return first
