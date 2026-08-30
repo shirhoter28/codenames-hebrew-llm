@@ -1,7 +1,10 @@
 import pytest
 import pandas as pd
 
-from codenames_heb.agreement import CELL_KEY, PANEL_KEY, first_rounds, normalize_clue, panel_agreement
+from codenames_heb.agreement import (
+    CELL_KEY, PANEL_KEY, first_rounds, normalize_clue, panel_agreement,
+    consensus_hard_by_dual, word_consensus,
+)
 
 
 def test_normalize_strips_niqqud():
@@ -162,3 +165,46 @@ def test_panel_agreement_skips_a_single_codemaster_panel(cell_rounds):
     solo = cell_rounds[cell_rounds["model"] == "v/alpha"]
 
     assert panel_agreement(solo).empty
+
+
+@pytest.fixture
+def boards():
+    """One board. `א` is aimed at by every draw; `ד` by none."""
+    return {
+        ("natural", 0): {
+            "roles": {"א": "target", "ב": "target", "ד": "target", "ה": "civilian"},
+            "is_dual": {"א": False, "ב": False, "ד": True, "ה": False},
+        }
+    }
+
+
+def test_word_consensus_flags_a_target_no_model_aims_at(cell_rounds, boards):
+    out = word_consensus(cell_rounds, boards)
+    hard = out[out["is_consensus_hard"] == 1.0]
+
+    assert set(hard["word"]) == {"ד"}
+
+
+def test_word_consensus_does_not_flag_a_word_every_draw_names(cell_rounds, boards):
+    out = word_consensus(cell_rounds, boards)
+    row = out[out["word"] == "א"].iloc[0]
+
+    assert row["n_picks"] == 8
+    assert row["word_pick_rate"] == 1.0
+    assert row["is_consensus_hard"] == 0.0
+
+
+def test_word_consensus_never_flags_a_non_target(cell_rounds, boards):
+    # A civilian that nobody aims at is correct play, not a hard word.
+    out = word_consensus(cell_rounds, boards)
+    civilian = out[out["word"] == "ה"].iloc[0]
+
+    assert civilian["n_picks"] == 0
+    assert civilian["is_consensus_hard"] == 0.0
+
+
+def test_consensus_hard_crosses_with_the_dual_flag(cell_rounds, boards):
+    out = consensus_hard_by_dual(word_consensus(cell_rounds, boards))
+
+    assert "is_consensus_hard_mean" in out.columns
+    assert set(out["is_dual"]) == {0.0, 1.0}

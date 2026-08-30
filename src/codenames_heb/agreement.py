@@ -147,3 +147,50 @@ def panel_agreement(rounds: pd.DataFrame, group_cols=None) -> pd.DataFrame:
             "consensus_share": modal_n / len(clues),
         })
     return pd.DataFrame(records)
+
+
+def word_consensus(rounds: pd.DataFrame, boards: dict, group_cols=None) -> pd.DataFrame:
+    """How often each board word is aimed at, per panel.
+
+    A TARGET that no draw ever names is a consensus-hard word. Crossing that
+    against `is_dual` tests whether ambiguity makes a word hard to CUE, which
+    is the other half of the question `dual_miss_lift` asks about guessing.
+    """
+    group_cols = list(group_cols or PANEL_KEY)
+    first = first_rounds(rounds)
+    records = []
+    for keys, sub in first.groupby(group_cols, dropna=False, observed=True):
+        key = _keys_to_dict(group_cols, keys)
+        board = boards.get((key.get("board_style"), key.get("board_seed")))
+        if not board:
+            continue
+        picks = Counter(word for target_set in sub["target_set"] for word in target_set)
+        for word, role in board["roles"].items():
+            records.append({
+                **key,
+                "word": word,
+                "role": role,
+                "is_dual": float(bool((board.get("is_dual") or {}).get(word))),
+                "n_draws": len(sub),
+                "n_picks": picks.get(word, 0),
+                "word_pick_rate": picks.get(word, 0) / len(sub),
+            })
+    out = pd.DataFrame(records)
+    if out.empty:
+        return out
+    # Only a TARGET can be consensus-hard: a civilian nobody aims at is correct
+    # play, not a word the models failed to find a link for.
+    out["is_consensus_hard"] = (
+        (out["role"] == "target") & (out["n_picks"] == 0)
+    ).astype(float)
+    return out
+
+
+def consensus_hard_by_dual(consensus: pd.DataFrame) -> pd.DataFrame:
+    """Are ambiguous target words harder to cue than unambiguous ones?"""
+    if consensus.empty:
+        return consensus
+    targets = consensus[consensus["role"] == "target"]
+    return summarize(targets, ["board_style", "is_dual"],
+                     ["is_consensus_hard", "word_pick_rate"],
+                     proportions=["is_consensus_hard"])
