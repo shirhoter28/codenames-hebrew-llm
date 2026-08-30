@@ -17,6 +17,10 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 import pandas as pd  # noqa: E402
 
 from codenames_heb import plots  # noqa: E402
+from codenames_heb.agreement import (  # noqa: E402
+    panel_agreement,
+    self_consistency_summary,
+)
 from codenames_heb.analysis import (  # noqa: E402
     comparison_power,
     compliance_table,
@@ -27,6 +31,7 @@ from codenames_heb.analysis import (  # noqa: E402
     scaling_projection,
     stop_class_table,
     style_order,
+    summarize,
 )
 
 # Every table is emitted collapsed *and* stratified by board style: style is
@@ -149,6 +154,14 @@ def _role_compliance(games: pd.DataFrame, group_col: str, role: str) -> pd.DataF
     table = compliance_table(games, [group_col])
     other = "guesser" if role == "codemaster" else "codemaster"
     return table.drop(columns=[c for c in table.columns if c.startswith(other)])
+
+
+def summarize_panels(panels: pd.DataFrame) -> pd.DataFrame:
+    """Collapse the per-panel agreement rows to one row per board style."""
+    return summarize(
+        panels, ["board_style"],
+        ["n_distinct_clues", "pairwise_clue_agreement", "pairwise_target_jaccard"],
+    )
 
 
 def _cell(value) -> str:
@@ -377,6 +390,36 @@ def build_report(data, figure_paths: dict, run_label: str) -> str:
                 "ambiguity is not the mechanism driving errors.",
             )
         )
+
+    consistency = self_consistency_summary(rounds, group_cols=("model",))
+    if not consistency.empty:
+        lines.append(
+            _section(
+                "Round-1 agreement — self-consistency",
+                _fmt(consistency),
+                "On round 1 nothing is revealed, so the codemaster's input is fixed "
+                "by (board, model, method, floor) and the guesser cannot have "
+                "influenced it. The guesser-runs of one cell are therefore repeat "
+                "draws from an IDENTICAL prompt. `is_unanimous_mean` is the share of "
+                "cells where a model gave one clue every time; `self_jaccard_mean` is "
+                "the mean overlap of the words it aimed at. A low unanimity beside a "
+                "high Jaccard means unstable phrasing but a stable strategy. "
+                "**Temperature is each provider's default and is neither set nor "
+                "recorded**, so this is self-consistency at default sampling "
+                "settings, not at a controlled temperature.",
+            )
+        )
+        panels = panel_agreement(rounds)
+        if not panels.empty:
+            lines.append(
+                _section(
+                    "Round-1 agreement — across codemasters",
+                    _fmt(summarize_panels(panels)),
+                    "Pairs from DIFFERENT codemasters only; including "
+                    "same-codemaster pairs would fold self-consistency into the "
+                    "agreement number and inflate it for the most stable models.",
+                )
+            )
 
     lines.append(
         _section(

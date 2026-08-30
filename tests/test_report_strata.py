@@ -92,3 +92,42 @@ def test_labels_name_the_role_not_the_bare_column():
 
     label = next(k for k, v in strata.items() if v == ["model", "guesser_model"])
     assert "codemaster" in label and "guesser" in label
+
+
+def test_report_carries_the_round_one_agreement_section():
+    import pandas as pd
+
+    class Data:
+        pass
+
+    rows = []
+    for i in range(4):
+        for model, clue in (("v/alpha", "בית"), ("v/beta", f"קלו{i}")):
+            rows.append({
+                "board_style": "natural", "board_seed": 0, "model": model,
+                "guesser_model": f"g{i}", "method": "strong_hebrew",
+                "count_constraint": "free", "round": 1, "clue": clue,
+                "intended_targets": ["א"], "count": 1, "n_correct": 1,
+                "stop_class": "stopped_at_quota", "first_miss_role": None,
+                "first_miss_is_dual": None,
+            })
+    data = Data()
+    data.rounds = pd.DataFrame(rows)
+    # Two rows, differing only in guesser_model: a single-row games table
+    # leaves every design column at nunique==1, which empties `_design_cols`
+    # and makes `scaling_projection` group by zero keys — a pre-existing crash
+    # unrelated to the section under test here.
+    data.games = pd.DataFrame([{
+        "run_id": "r", "model": "v/alpha", "method": "strong_hebrew",
+        "guesser_model": guesser, "count_constraint": "free",
+        "board_style": "natural", "board_seed": 0, "trial": 0,
+        "completed": True, "outcome": "win", "is_win": 1.0, "is_loss": 0.0,
+        "game_length": 5.0, "total_api_calls": 10, "rejection_reasons": {},
+    } for guesser in ("g0", "g1")])
+    data.boards = {}
+    data.run_ids = ["r"]
+
+    result = report.build_report(data, {}, "test")
+
+    assert "Round-1 agreement" in result
+    assert "self-consistency" in result.lower()
