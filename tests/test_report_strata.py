@@ -95,8 +95,6 @@ def test_labels_name_the_role_not_the_bare_column():
 
 
 def test_report_carries_the_round_one_agreement_section():
-    import pandas as pd
-
     class Data:
         pass
 

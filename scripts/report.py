@@ -396,7 +396,17 @@ def build_report(data, figure_paths: dict, run_label: str) -> str:
         lines.append(
             _section(
                 "Round-1 agreement — self-consistency",
-                _fmt(consistency),
+                _fmt(
+                    consistency,
+                    drop=[
+                        "n_draws_se", "n_draws_n",
+                        "n_distinct_clues_se", "n_distinct_clues_n",
+                        "is_unanimous_se", "is_unanimous_n",
+                        "modal_share_se", "modal_share_n",
+                        "n_distinct_target_sets_se", "n_distinct_target_sets_n",
+                        "self_jaccard_se", "self_jaccard_n",
+                    ],
+                ),
                 "On round 1 nothing is revealed, so the codemaster's input is fixed "
                 "by (board, model, method, floor) and the guesser cannot have "
                 "influenced it. The guesser-runs of one cell are therefore repeat "
