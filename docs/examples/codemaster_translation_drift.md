@@ -5,6 +5,9 @@ Each codemaster call is stateless — `build_translate_pipeline_prompt` rebuilds
 whole board and asks for a fresh `translation_map` — so the English gloss of a
 Hebrew board word is re-drawn every round, with no memory of the previous one.
 
+> Full boards and complete transcripts for the headline cases: [`full_games.md`](full_games.md).
+> Browse any other game with `python scripts/show_game.py results/<run_id> --list`.
+
 ## 1. הודו: turkey → india, and the clue follows the flip
 
 **הודו** — google/gemini-2.5-flash (cm) / google/gemini-2.5-flash (guesser) · board `dual_100` seed 10 · game win
@@ -317,3 +320,86 @@ translate advantage, distinct from general English competence.
 | **רפאים** | רוח-רפאים | gpt-4o-mini | `strong_hebrew` | natural s6 | רוח-רפאים (target), קברן (civilian) |
 | **מקורות** | מקור | gpt-4o-mini | `strong_hebrew` | natural s6 | מקור (target) |
 | **אורות** | אור | llama-3.3-70b-instruct | `strong_hebrew` | natural s7 | אור (target), אופרה (civilian) |
+
+---
+
+## Do codemasters group targets by sound rather than meaning?
+
+Two detectors over `intended_targets`, scored against the exact probability that a
+random draw of the same size from the same board's remaining team words would contain
+a matching pair:
+
+- **minimal pair** — same length, differing only in the first letter (קצב/חצב, ספר/תפר)
+- **rhyme** — a shared final chunk of at least two letters that is at least half the
+  shorter word, with different first letters
+
+| codemaster / method | rounds | minimal obs | chance | ratio | rhyme obs | chance | ratio |
+|---|---|---|---|---|---|---|---|
+| gemini-2.5-flash / `strong_hebrew` | 11,784 | 0.08% | 0.1% | 0.83 | 1.23% | 0.97% | 1.27 |
+| llama-3.3-70b-instruct / `strong_hebrew` | 7,371 | 0.18% | 0.19% | 0.91 | 1.59% | 1.82% | 0.87 |
+| gpt-4o-mini / `strong_hebrew` | 13,251 | 0.08% | 0.11% | 0.77 | 0.92% | 1.23% | 0.75 |
+| qwen3.5-9b / `strong_hebrew` | 7,988 | 0.23% | 0.18% | 1.26 | 2.88% | 2.64% | 1.09 |
+| gemini-2.5-flash / `translate_pipeline` | 11,700 | 0.18% | 0.19% | 0.94 | 1.7% | 1.59% | 1.07 |
+| llama-3.3-70b-instruct / `translate_pipeline` | 7,783 | 0.35% | 0.28% | 1.25 | 2.9% | 3.32% | 0.88 |
+| gpt-4o-mini / `translate_pipeline` | 12,265 | 0.11% | 0.17% | 0.67 | 2.1% | 2.29% | 0.92 |
+| qwen3.5-9b / `translate_pipeline` | 7,868 | 0.36% | 0.33% | 1.08 | 3.16% | 3.29% | 0.96 |
+| **pooled** | **80,010** | **0.18%** | **0.18%** | **0.97** | **1.93%** | **2.01%** | **0.96** |
+
+**No systematic sound strategy exists.** Pooled, both ratios sit on 1.00, and no model
+moves consistently in either direction across the two methods. Codemasters group targets
+by meaning; when targets happen to rhyme it is the board, not a strategy.
+
+And it costs nothing when it does happen. Per-target recall — was this intended word
+actually guessed — with target count held fixed, since recall falls steeply with count:
+
+| targets in the clue | sound-paired | same round, unpaired | no sound pair in round |
+|---|---|---|---|
+| 2 | 33.0% (n=808) | — | 34.2% (n=90,856) |
+| 3 | 25.3% (n=1,416) | 23.1% (n=681) | 23.3% (n=80,922) |
+| 4 | 20.5% (n=507) | 15.2% (n=473) | 17.4% (n=18,088) |
+| 5+ | 12.4% (n=435) | 12.8% (n=847) | 11.6% (n=8,651) |
+
+A sound-paired target is found about as often as any other — slightly *more* often at
+3 and 4 targets than its own unpaired siblings in the same round. The phonological
+neighbour is usually also the semantically right word.
+
+### The instances are still worth reading
+
+142 minimal-pair rounds and 1,546 rhyme rounds exist, and some are unmistakable. The
+clearest is round 8 of `dual_100` seed 12 (full transcript in `full_games.md`):
+**clue מקצב, targets קצב + מעמד + חצב**. מקצב is קצב with a prefix — a root-echo — and
+קצב (rhythm) is semantically right for it. חצב means *quarry* or *squill*; nothing about
+"rhythm" reaches it. It is in the clue because it sounds like קצב. The codemaster then
+spends rounds 9-12 failing to clue חצב by any other route and loses on the assassin.
+
+| pair | clue | all intended targets | codemaster / method | turn |
+|---|---|---|---|---|
+| בשר / קשר | **אוניברסיטה** | אקדח, סוכן, עלייה, בשר, בעל, קשר, דלק, עוקץ, מדליק | qwen3.5-9b / `strong_hebrew` | hit_civilian |
+| ספר / תפר | **חומר** | ספר, תפר | llama-3.3-70b-instruct / `strong_hebrew` | hit_opponent |
+| קצב / חצב | **מקצב** | קצב, מעמד, חצב | gpt-4o-mini / `strong_hebrew` | hit_opponent |
+| קצב / חצב | **מגיע** | אוגר, קצב, מעמד, מקל, חצב | qwen3.5-9b / `strong_hebrew` | hit_opponent |
+| קצב / חצב | **עורמה** | אוגר, קצב, בסיס, מעמד, חצב | qwen3.5-9b / `strong_hebrew` | hit_civilian |
+| ספר / תפר | **אמנות** | ספר, תפר | llama-3.3-70b-instruct / `strong_hebrew` | hit_opponent |
+| ספר / תפר | **פרנסה** | ספר, תפר, אח | qwen3.5-9b / `strong_hebrew` | hit_opponent |
+| ספר / תפר | **כתב** | ספר, תפר | qwen3.5-9b / `strong_hebrew` | stopped_early |
+| קצב / חצב | **ציור** | קצב, חצב, אמן | qwen3.5-9b / `strong_hebrew` | hit_civilian |
+| קצב / חצב | **guild** | קצב, חצב | qwen3.5-9b / `strong_hebrew` | hit_civilian |
+| קשר / בשר | **ירושלים** | קשר, בעל, מדליק, בשר | qwen3.5-9b / `strong_hebrew` | hit_civilian |
+| בשר / קשר | **מטרה** | אקדח, סוכן, עלייה, בשר, בעל, קשר, דלק, עוקץ | qwen3.5-9b / `strong_hebrew` | hit_assassin |
+| בשר / קשר | **חיבור** | בשר, קשר, עוקץ | gpt-4o-mini / `strong_hebrew` | hit_opponent |
+| ספר / תפר | **שולחן** | כפתור, ספר, תפר, יוון | qwen3.5-9b / `strong_hebrew` | hit_civilian |
+| ספר / תפר | **בינה** | כפתור, שנהב, ספר, אח, יוון, תפר, אוזן-המן | qwen3.5-9b / `strong_hebrew` | hit_assassin |
+| ספר / תפר | **בית** | חווה, ספר, תפר | llama-3.3-70b-instruct / `strong_hebrew` | hit_civilian |
+
+The recurring pairs are קצב/חצב, ספר/תפר and בשר/קשר. Note how often the clue supports
+exactly one member: חיבור (connection) reaches קשר and not בשר; פעימה (beat) reaches קצב
+and not חצב; כתב (writing) reaches ספר and not תפר.
+
+### A caveat on coverage
+
+The pairs that motivated this check cannot occur in these runs. נוף is in neither word
+list. חוף and סוף share exactly one board (`natural` seed 45) and sit on opposite teams
+there; קל and גל share two boards and are both civilian on one and both opponent on the
+other. No board in M4 or M5 can make either pair jointly targetable, so their absence
+from the results is a property of the word lists, not evidence about the models.
+

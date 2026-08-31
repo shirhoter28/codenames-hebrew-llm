@@ -8,6 +8,9 @@ a turn the model chose to continue.
 The guesser is never shown reasoning fields — only `guess_sequence` is logged — so
 everything below is inferred from the guesses themselves.
 
+> Full boards and complete transcripts for the headline cases: [`full_games.md`](full_games.md).
+> Browse any other game with `python scripts/show_game.py results/<run_id> --list`.
+
 ## 1. Compliance
 
 `attempts` counts retries, so the rate is length-independent. `illegal guess` is
