@@ -8,8 +8,9 @@ a turn the model chose to continue.
 The guesser is never shown reasoning fields — only `guess_sequence` is logged — so
 everything below is inferred from the guesses themselves.
 
-> Full boards and complete transcripts for the headline cases: [`full_games.md`](full_games.md).
-> Browse any other game with `python scripts/show_game.py results/<run_id> --list`.
+> **Every example below is rendered in full — board, all rounds, per-round gloss — in [`full_games.md`](full_games.md).**
+> Each carries the `scripts/show_game.py` command that reproduces it. To add one, append to
+> [`manifest.json`](manifest.json) and run `python scripts/render_examples.py results/<run_id> ...`.
 
 ## 1. Compliance
 

@@ -5,8 +5,9 @@ Each codemaster call is stateless — `build_translate_pipeline_prompt` rebuilds
 whole board and asks for a fresh `translation_map` — so the English gloss of a
 Hebrew board word is re-drawn every round, with no memory of the previous one.
 
-> Full boards and complete transcripts for the headline cases: [`full_games.md`](full_games.md).
-> Browse any other game with `python scripts/show_game.py results/<run_id> --list`.
+> **Every example below is rendered in full — board, all rounds, per-round gloss — in [`full_games.md`](full_games.md).**
+> Each carries the `scripts/show_game.py` command that reproduces it. To add one, append to
+> [`manifest.json`](manifest.json) and run `python scripts/render_examples.py results/<run_id> ...`.
 
 ## 1. הודו: turkey → india, and the clue follows the flip
 
