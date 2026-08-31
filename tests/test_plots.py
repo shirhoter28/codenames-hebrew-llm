@@ -617,3 +617,92 @@ def test_self_consistency_grid_is_none_when_every_cell_has_one_draw(agreement_ro
     assert single_draw["count_constraint"].nunique() >= 2
 
     assert plots.fig_self_consistency_grid(single_draw, "count_constraint") is None
+
+
+# --- Gloss figures -------------------------------------------------------
+
+
+@pytest.fixture
+def gloss_counts_frame():
+    """Two words x two models, spanning every sense bucket: a clean lean, a
+    hedge, a reversed default, and a word a model mostly glosses off-sense."""
+    rows = [
+        ("vendor/alpha", "הודו", "india", 90), ("vendor/alpha", "הודו", "turkey", 10),
+        ("vendor/beta", "הודו", "turkey", 80), ("vendor/beta", "הודו", "india", 20),
+        ("vendor/alpha", "כבד", "heavy/liver", 50), ("vendor/alpha", "כבד", "heavy", 50),
+        ("vendor/beta", "כבד", "kidney", 70), ("vendor/beta", "כבד", "liver", 30),
+    ]
+    return pd.DataFrame(rows, columns=["model", "word", "gloss", "n"])
+
+
+@pytest.fixture
+def gloss_shares_frame(gloss_counts_frame):
+    from codenames_heb.glosses import sense_shares
+
+    return sense_shares(gloss_counts_frame)
+
+
+WORDS = ["הודו", "כבד"]
+MODELS = ["vendor/alpha", "vendor/beta"]
+
+
+def test_sense_split_draws_a_panel_per_word(gloss_shares_frame):
+    fig = plots.gloss_sense_split(gloss_shares_frame, WORDS, MODELS)
+    drawn = [ax for ax in fig.axes if ax.get_title()]
+    assert len(drawn) == len(WORDS)
+
+
+def test_sense_split_titles_name_both_senses(gloss_shares_frame):
+    fig = plots.gloss_sense_split(gloss_shares_frame, WORDS, MODELS)
+    titles = " ".join(ax.get_title() for ax in fig.axes)
+    for token in ("הודו", "India", "turkey", "כבד", "heavy", "liver"):
+        assert token in titles
+
+
+def test_sense_split_names_the_off_sense_share_on_the_model_label(gloss_shares_frame):
+    """vendor/beta glosses כבד as "kidney" 70% of the time — neither sense. The
+    bar is short by that much, so the number has to appear or the gap is unread."""
+    fig = plots.gloss_sense_split(gloss_shares_frame, WORDS, MODELS)
+    labels = [t.get_text() for ax in fig.axes for t in ax.get_yticklabels()]
+    assert any("70% neither sense" in label for label in labels)
+
+
+def test_sense_split_omits_the_note_when_every_gloss_named_a_sense(gloss_shares_frame):
+    fig = plots.gloss_sense_split(gloss_shares_frame, WORDS, MODELS)
+    hodu = next(ax for ax in fig.axes if ax.get_title().startswith("הודו"))
+    assert all("neither" not in t.get_text() for t in hodu.get_yticklabels())
+
+
+def test_table_prints_every_word_and_model(gloss_counts_frame):
+    fig = plots.gloss_table(gloss_counts_frame, WORDS, MODELS)
+    text = " ".join(t.get_text() for t in fig.axes[0].texts)
+    # Model headers wear the short name, as everywhere else in this module.
+    for token in (*WORDS, "alpha", "beta", "india", "turkey", "kidney"):
+        assert token in text
+
+
+def test_table_shows_a_rare_gloss_as_under_one_percent(gloss_counts_frame):
+    # 1 round in 1,001 is a real observation that rounds to zero. Only three
+    # glosses, so the rare one is inside the top k and actually gets drawn.
+    rare = pd.DataFrame(
+        [("vendor/alpha", "הודו", "india", 900),
+         ("vendor/alpha", "הודו", "turkey", 100),
+         ("vendor/alpha", "הודו", "hindustan", 1)],
+        columns=["model", "word", "gloss", "n"],
+    )
+    fig = plots.gloss_table(rare, ["הודו"], ["vendor/alpha"], k=3)
+    shares = {t.get_text() for t in fig.axes[0].texts if t.get_text().endswith("%")}
+    assert "<1%" in shares
+    assert "0%" not in shares
+
+
+def test_table_names_a_script_the_figure_font_cannot_draw(gloss_counts_frame):
+    cjk = pd.concat([
+        gloss_counts_frame,
+        pd.DataFrame([("vendor/alpha", "כבד", "旅館", 40)],
+                     columns=["model", "word", "gloss", "n"]),
+    ], ignore_index=True)
+    fig = plots.gloss_table(cjk, WORDS, MODELS)
+    text = " ".join(t.get_text() for t in fig.axes[0].texts)
+    assert "旅館" not in text
+    assert "(non-Latin script)" in text

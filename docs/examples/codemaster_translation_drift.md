@@ -220,6 +220,31 @@ translation by round: `{'4': 'wild/son/bar', '5': 'wild', '6': 'son', '8': 'bar/
 
 ## Across games and boards: the default sense is model-specific
 
+![Which English sense each codemaster reaches for](../figures/gloss_sense_split.png)
+
+Each bar is one model's rounds for one word, split into the two senses with the
+hedged "both named" glosses straddling the centre. Bars are shares of *all* rounds
+and are deliberately not renormalised, so where a model glossed the word as neither
+sense the bar is simply short and the gap is named on the model label.
+
+The polarity flips are the point. `מטר` is *meter* for three models and **rain** for
+llama; `קל` is *easy* for gemini and gpt-4o-mini and **light** for llama and qwen;
+`אלים` is *gods* for three and **violent** for gemini; `תור` is *turn* for three and
+**queue** for gpt-4o-mini. `כבד` splits three ways — gemini mostly hedges it.
+
+Hedging is itself a model signature: the grey band is a fifth of gemini's mass and
+is absent from llama and gpt-4o-mini entirely.
+
+![The glosses behind the split](../figures/gloss_table.png)
+
+The table keeps the English strings behind that lean — the distinct-gloss count per
+cell, and the three most frequent glosses with their share. Regenerate both with:
+
+```
+python scripts/gloss_figures.py results/20260823T191234131145Z results/20260829T225350499567Z
+```
+
+
 Share of all rounds in which each model glossed the word each way (top 3 senses;
 `a/b` means the model hedged both senses in one string).
 

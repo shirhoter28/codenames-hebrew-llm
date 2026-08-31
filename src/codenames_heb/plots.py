@@ -1215,3 +1215,223 @@ def save_all(data, out_dir, dpi: int = 150) -> dict:
         plt.close(fig)
         saved[name] = path
     return saved
+
+
+# --- Gloss figures -------------------------------------------------------
+#
+# These two answer one question — which English sense does each model default
+# to for an ambiguous Hebrew word — and they are a pair on purpose: the chart
+# shows the lean, the table shows the words behind it. The chart is a diverging
+# stacked bar because the reader's job is polarity (which side of the sense
+# boundary a model sits on), and diverging is the form for polarity.
+#
+# Palette: the diverging blue<->red pair, validated (worst adjacent CVD ΔE 21.6
+# protan on the light surface). The neutral midpoint is stepped from the
+# documented `#f0efec` to the neutral-family `#c3c2b7`: "both senses named" is a
+# fifth of gemini's mass, and at #f0efec on a near-white surface that segment is
+# invisible. Same family, still unmistakably not-a-hue, so it still reads as the
+# midpoint.
+
+GLOSS_SENSE_A = "#2a78d6"
+GLOSS_SENSE_B = "#e34948"
+GLOSS_BOTH = "#c3c2b7"
+GLOSS_SURFACE = "#fcfcfb"
+GLOSS_INK = "#0b0b0b"
+GLOSS_INK_2 = "#52514e"
+GLOSS_MUTED = "#898781"
+GLOSS_RULE = "#e4e3de"
+
+
+def _renderable(gloss: str) -> str:
+    """Glosses are drawn in DejaVu Sans, which covers Latin and Hebrew but no
+    CJK. A model that answered in another script is a real observation, so say
+    so instead of drawing an empty box."""
+    return gloss if all(ord(ch) < 0x0590 for ch in gloss) else "(non-Latin script)"
+# The surface gap between touching stacked segments, in share units.
+_GAP = 0.004
+
+
+def _sense_frame(shares, words, models):
+    order = {w: i for i, w in enumerate(words)}
+    frame = shares[shares["word"].isin(order)].copy()
+    frame["_w"] = frame["word"].map(order)
+    frame["_m"] = frame["model"].map({m: i for i, m in enumerate(models)})
+    return frame.sort_values(["_w", "_m"], ignore_index=True)
+
+
+def gloss_sense_split(shares, words, models, *, title=None, subtitle=None):
+    """Diverging stacked bars: which sense each model defaults to, per word.
+
+    One panel per word, one bar per model. The bar is centred on the midpoint of
+    the "both senses named" segment, so the two arms are comparable across
+    models even when the hedge width differs. Segments are shares of *all*
+    rounds and are deliberately not renormalised — where a model glossed the
+    word as neither sense the bar is simply short, and that missing length is
+    labelled rather than hidden.
+    """
+    frame = _sense_frame(shares, words, models)
+    ncols = 3
+    nrows = -(-len(words) // ncols)
+    fig, axes = plt.subplots(
+        nrows, ncols, figsize=(4.6 * ncols, 0.42 * len(models) * nrows + 1.15 * nrows),
+        squeeze=False,
+    )
+    fig.patch.set_facecolor(GLOSS_SURFACE)
+
+    for idx, word in enumerate(words):
+        ax = axes[idx // ncols][idx % ncols]
+        ax.set_facecolor(GLOSS_SURFACE)
+        rows = frame[frame["word"] == word]
+        if rows.empty:
+            ax.axis("off")
+            continue
+        a_label = rows["sense_a"].iloc[0]
+        b_label = rows["sense_b"].iloc[0]
+        tick_labels = []
+        for j, model in enumerate(models):
+            row = rows[rows["model"] == model]
+            if row.empty:
+                tick_labels.append(short_model(model))
+                continue
+            row = row.iloc[0]
+            y = -j
+            half = row["share_both"] / 2
+            # Left arm runs out from the midpoint of `both`, right arm from the
+            # same point, so the two arms stay comparable however wide the hedge.
+            if row["share_a"] > 0:
+                ax.barh(y, row["share_a"] - _GAP, left=-half - row["share_a"], height=0.62,
+                        color=GLOSS_SENSE_A, zorder=3)
+            if half > 0:
+                ax.barh(y, half - _GAP / 2, left=-half, height=0.62, color=GLOSS_BOTH,
+                        zorder=3)
+                ax.barh(y, half - _GAP / 2, left=_GAP / 2, height=0.62, color=GLOSS_BOTH,
+                        zorder=3)
+            if row["share_b"] > 0:
+                ax.barh(y, row["share_b"] - _GAP, left=half + _GAP, height=0.62,
+                        color=GLOSS_SENSE_B, zorder=3)
+            # The unrelated share is the bar's missing length. Naming it on the
+            # model label keeps it off the plot area, where it collided with the
+            # very bars whose shortness it explains.
+            label = short_model(model)
+            if row["share_unrelated"] >= 0.02:
+                label += f"\n{row['share_unrelated']:.0%} neither sense"
+            tick_labels.append(label)
+        ax.axvline(0, color=GLOSS_INK_2, lw=0.9, zorder=4)
+        ax.set_xlim(-1.02, 1.02)
+        ax.set_ylim(-len(models) + 0.45, 0.55)
+        ax.set_yticks([-j for j in range(len(models))])
+        ax.set_yticklabels(tick_labels, fontsize=7.4, color=GLOSS_INK_2)
+        ax.set_xticks([-1, -0.5, 0, 0.5, 1])
+        ax.set_xticklabels(["100%", "50%", "", "50%", "100%"], fontsize=6.4, color=GLOSS_MUTED)
+        ax.set_title(f"{word}      {a_label} ‹ › {b_label}", fontsize=9.5, color=GLOSS_INK,
+                     pad=6)
+        ax.tick_params(length=0)
+        for side in ("top", "right", "left", "bottom"):
+            ax.spines[side].set_visible(False)
+        ax.grid(axis="x", color=GLOSS_RULE, lw=0.7, zorder=0)
+        ax.set_axisbelow(True)
+
+    for idx in range(len(words), nrows * ncols):
+        axes[idx // ncols][idx % ncols].axis("off")
+
+    handles = [
+        plt.Rectangle((0, 0), 1, 1, color=GLOSS_SENSE_A),
+        plt.Rectangle((0, 0), 1, 1, color=GLOSS_BOTH),
+        plt.Rectangle((0, 0), 1, 1, color=GLOSS_SENSE_B),
+    ]
+    fig.legend(handles, ["first sense (left label)", "both named — the model hedged",
+                         "second sense (right label)"],
+               loc="lower center", ncol=3, frameon=False, fontsize=8.5,
+               bbox_to_anchor=(0.5, 0.002))
+    if title:
+        fig.suptitle(title, fontsize=13, color=GLOSS_INK, y=0.995)
+    if subtitle:
+        fig.text(0.5, 0.972, subtitle, ha="center", fontsize=8.5, color=GLOSS_INK_2)
+    fig.tight_layout(rect=(0, 0.045, 1, 0.962 if subtitle else 0.985))
+    return fig
+
+
+def gloss_table(counts, words, models, *, k=3, title=None, subtitle=None):
+    """The same data as a table figure: top glosses per model, per word.
+
+    The chart collapses each cell to a sense lean; this keeps the actual English
+    strings, which is what makes the finding checkable. A small square carries
+    sense identity beside each gloss — colour on the mark, never on the text.
+    """
+    from codenames_heb.glosses import BOTH, SENSES, UNRELATED, classify, top_glosses
+
+    tops = top_glosses(counts, k=k)
+    lookup = {(r["model"], r["word"]): r for _, r in tops.iterrows()}
+
+    row_h, head_h = 0.86, 0.62
+    col_w = 2.62
+    label_w = 1.05
+    # Deep enough that the subtitle clears the column headers below it.
+    title_band = 1.02 if title else 0.16
+    fig_w = label_w + col_w * len(models)
+    fig_h = title_band + head_h + row_h * len(words) + 0.55
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    fig.patch.set_facecolor(GLOSS_SURFACE)
+    ax.set_facecolor(GLOSS_SURFACE)
+    # The axes fill the figure and carry inch-for-inch coordinates, so every
+    # row lands where the layout arithmetic above puts it. tight_layout would
+    # rescale that and reopen the gap under the title.
+    ax.set_position((0, 0, 1, 1))
+    ax.set_xlim(0, fig_w)
+    ax.set_ylim(0, fig_h)
+    ax.axis("off")
+    if title:
+        ax.text(fig_w / 2, fig_h - 0.24, title, fontsize=13, color=GLOSS_INK,
+                ha="center", va="center")
+    if subtitle:
+        ax.text(fig_w / 2, fig_h - 0.5, subtitle, fontsize=8.5, color=GLOSS_INK_2,
+                ha="center", va="center")
+
+    top = fig_h - title_band
+    for j, model in enumerate(models):
+        ax.text(label_w + col_w * j + 0.06, top + 0.1, short_model(model),
+                fontsize=9, color=GLOSS_INK, fontweight="semibold")
+    ax.plot([0.04, fig_w - 0.04], [top - 0.06, top - 0.06], color=GLOSS_INK_2, lw=1.0)
+
+    for i, word in enumerate(words):
+        y = top - head_h - row_h * i
+        if i % 2 == 1:
+            ax.add_patch(plt.Rectangle((0.04, y - row_h + 0.24), fig_w - 0.08, row_h,
+                                       color="#f6f5f2", zorder=0))
+        (a_label, _), (b_label, _) = SENSES[word]
+        ax.text(0.1, y, word, fontsize=12, color=GLOSS_INK, va="top")
+        ax.text(0.1, y - 0.3, f"{a_label} / {b_label}", fontsize=6.6,
+                color=GLOSS_MUTED, va="top")
+        for j, model in enumerate(models):
+            rec = lookup.get((model, word))
+            x = label_w + col_w * j + 0.06
+            if rec is None:
+                ax.text(x, y, "—", fontsize=8, color=GLOSS_MUTED, va="top")
+                continue
+            ax.text(x, y, f"{rec['n_glosses']} distinct", fontsize=7,
+                    color=GLOSS_INK_2, va="top")
+            for line, (gloss, _, share) in enumerate(rec["top"]):
+                gy = y - 0.235 - 0.185 * line
+                sense = classify(word, gloss)
+                color = {a_label: GLOSS_SENSE_A, b_label: GLOSS_SENSE_B,
+                         BOTH: GLOSS_BOTH, UNRELATED: GLOSS_MUTED}[sense]
+                ax.add_patch(plt.Rectangle((x, gy - 0.045), 0.075, 0.075, color=color,
+                                           zorder=3))
+                shown = _renderable(gloss)
+                shown = shown if len(shown) <= 22 else shown[:21] + "…"
+                ax.text(x + 0.115, gy, shown, fontsize=7.2, color=GLOSS_INK, va="center")
+                # A real but rare gloss must not print as a flat 0%.
+                pct = f"{share:.0%}" if round(share * 100) >= 1 else "<1%"
+                ax.text(x + col_w - 0.16, gy, pct, fontsize=7.2,
+                        color=GLOSS_INK_2, va="center", ha="right")
+        ax.plot([0.04, fig_w - 0.04], [y - row_h + 0.22, y - row_h + 0.22],
+                color=GLOSS_RULE, lw=0.6, zorder=1)
+
+    keys = [("first sense", GLOSS_SENSE_A), ("second sense", GLOSS_SENSE_B),
+            ("both named", GLOSS_BOTH), ("neither sense", GLOSS_MUTED)]
+    x = 0.1
+    for label, color in keys:
+        ax.add_patch(plt.Rectangle((x, 0.2), 0.085, 0.085, color=color, zorder=3))
+        ax.text(x + 0.13, 0.243, label, fontsize=7.4, color=GLOSS_INK_2, va="center")
+        x += 0.13 + 0.115 * len(label)
+    return fig
