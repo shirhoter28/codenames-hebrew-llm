@@ -1345,11 +1345,21 @@ def gloss_sense_split(shares, words, models, *, title=None, subtitle=None):
                          "second sense (right label)"],
                loc="lower center", ncol=3, frameon=False, fontsize=8.5,
                bbox_to_anchor=(0.5, 0.002))
+    # Title block placed in inches, not figure fractions: a two-row grid is
+    # about half the height of a four-row one, and a fixed fraction puts the
+    # subtitle through the title on the short one.
+    height = fig.get_figheight()
+    top = 1.0
     if title:
-        fig.suptitle(title, fontsize=13, color=GLOSS_INK, y=0.995)
+        fig.text(0.5, 1 - 0.24 / height, title, ha="center", va="top", fontsize=13,
+                 color=GLOSS_INK)
+        top = 1 - 0.46 / height
     if subtitle:
-        fig.text(0.5, 0.972, subtitle, ha="center", fontsize=8.5, color=GLOSS_INK_2)
-    fig.tight_layout(rect=(0, 0.045, 1, 0.962 if subtitle else 0.985))
+        y = 1 - (0.52 if title else 0.24) / height
+        fig.text(0.5, y, subtitle, ha="center", va="top", fontsize=8.5,
+                 color=GLOSS_INK_2, wrap=True)
+        top = 1 - ((0.94 if title else 0.62) / height)
+    fig.tight_layout(rect=(0, 0.045, 1, top))
     return fig
 
 

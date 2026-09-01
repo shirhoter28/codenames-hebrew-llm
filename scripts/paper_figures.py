@@ -28,7 +28,8 @@ from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 
 from codenames_heb import plots  # noqa: E402
-from codenames_heb.analysis import load_runs  # noqa: E402
+from codenames_heb.analysis import load_runs, pair_table  # noqa: E402
+from codenames_heb.glosses import SENSES, gloss_counts, sense_shares  # noqa: E402
 from codenames_heb.palette import (  # noqa: E402
     BASELINE, GRID, INK, INK_2, MUTED, SEQ_BLUE, SERIES, STYLE_RAMP, SURFACE,
     MODEL_ORDER as _FULL_MODEL_ORDER, display_model,
@@ -532,6 +533,332 @@ def fig_stopping(g, r):
     return fig
 
 
+
+# --------------------------------------------------------------------------
+# The selected set — figures rebuilt to the shape the report actually uses
+# --------------------------------------------------------------------------
+
+SUBSET_MODELS = ["gemini-2.5-flash", "gpt-4o-mini"]
+
+
+def board_note(df) -> str:
+    """`30 boards · 933 games` — the denominator behind one column."""
+    return f"{df.board_seed.nunique()} boards · {len(df):,} games"
+
+
+def two_model_subset(g):
+    """The pair grid the top-up actually played, on all 450 pooled boards."""
+    return g[g.cm.isin(SUBSET_MODELS) & g.gs.isin(SUBSET_MODELS)]
+
+
+def fig_method_style_grid(g):
+    """Prompt method and board ambiguity in one grid (replaces two figures).
+
+    Rows are the two headline measures, columns the three board styles, and
+    each panel holds all four codemasters under both prompt methods — so the
+    method effect, the style effect and the codemaster ordering are all read
+    off one figure, and any interaction between them is visible rather than
+    averaged away.
+    """
+    done = g[g.outcome.isin(["win", "loss"])]
+    wins = done[done.is_win == 1]
+    models = MODEL_ORDER
+    cols = model_colors(models)
+    fig, axes = plt.subplots(2, 3, figsize=(12.4, 7.0), sharey="row")
+    for j, style in enumerate(STYLE_ORDER):
+        sub = done[done.board_style == style]
+        wsub = wins[wins.board_style == style]
+        for i, (frame, metric, fmt, label) in enumerate([
+            (sub, "is_win", "{:.0%}", "win rate"),
+            (wsub, "game_length", "{:.1f}", "rounds to win"),
+        ]):
+            ax = axes[i][j]
+            x = np.arange(len(models))
+            w = 0.38
+            for k, method in enumerate(["strong_hebrew", "translate_pipeline"]):
+                vals = [frame[(frame.cm == m) & (frame.method == method)][metric].mean()
+                        for m in models]
+                ax.bar(x + (k - 0.5) * w, vals, width=w * 0.88,
+                       color=[cols[m] for m in models], zorder=3,
+                       hatch="" if k == 0 else "///", edgecolor=SURFACE, linewidth=0.8)
+                for xi, v in zip(x, vals):
+                    ax.text(xi + (k - 0.5) * w, v, fmt.format(v), ha="center",
+                            va="bottom", fontsize=6.6, color=INK_2, rotation=90)
+            ax.set_xticks(x)
+            ax.set_xticklabels([m.replace("-instruct", "") for m in models],
+                               fontsize=7.2, color=INK_2, rotation=25, ha="right")
+            if i == 0:
+                ax.set_title(f"{STYLE_LABEL[style].splitlines()[0]}\n{board_note(sub)}",
+                             fontsize=9.5, color=INK, pad=8)
+                pct_axis(ax)
+            if j == 0:
+                ax.set_ylabel(label, fontsize=9)
+            tidy(ax)
+    # Rows share a y-axis, so the headroom for the rotated labels is set once
+    # per row from that row's own maximum rather than per panel.
+    for i in range(2):
+        row_max = max(ax.get_ylim()[1] for ax in axes[i])
+        for ax in axes[i]:
+            ax.set_ylim(0, row_max)
+    handles = [Patch(facecolor=cols[m], label=m) for m in models] + [
+        Patch(facecolor="#dddddd", label="Hebrew-Direct"),
+        Patch(facecolor="#dddddd", hatch="///", label="English-Pivot"),
+    ]
+    fig.legend(handles=handles, loc="lower center", ncol=6, frameon=False, fontsize=8.5,
+               labelcolor=INK_2, bbox_to_anchor=(0.5, -0.012))
+    top = titles(fig, "Prompt method and board ambiguity together",
+                 "Rows: the two headline measures. Columns: board style. Bars: the four "
+                 "codemasters, solid for Hebrew-Direct and hatched for English-Pivot.")
+    fig.tight_layout(rect=(0, 0.06, 1, top))
+    return fig
+
+
+def fig_length_by_style(g):
+    """Game length by style, and the decomposition that explains its shape."""
+    done = g[g.outcome.isin(["win", "loss"])]
+    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.3))
+    bins = np.arange(0.5, done.game_length.max() + 1.5, 1)
+    for i, style in enumerate(STYLE_ORDER):
+        sub = done[done.board_style == style]
+        axes[0].hist(sub.game_length, bins=bins, histtype="step", lw=1.9,
+                     color=STYLE_RAMP[i], density=True, zorder=3,
+                     label=f"{style} — {board_note(sub)}")
+    axes[0].set_xlabel("rounds played", fontsize=9)
+    axes[0].set_ylabel("share of games", fontsize=9)
+    axes[0].set_title("All games, by board style", fontsize=10, color=INK, loc="left", pad=8)
+    axes[0].legend(frameon=False, fontsize=7.6, labelcolor=INK_2)
+    pct_axis(axes[0])
+    tidy(axes[0])
+
+    for label, frame, color in [("wins", done[done.is_win == 1], SERIES[0]),
+                                ("losses", done[done.is_win == 0], SERIES[1])]:
+        axes[1].hist(frame.game_length, bins=bins, histtype="step", lw=1.9, color=color,
+                     density=True, zorder=3, label=f"{label} ({len(frame):,} games)")
+    axes[1].set_xlabel("rounds played", fontsize=9)
+    axes[1].set_ylabel("share of games", fontsize=9)
+    axes[1].set_title("The same games, split by outcome", fontsize=10, color=INK,
+                      loc="left", pad=8)
+    axes[1].legend(frameon=False, fontsize=8, labelcolor=INK_2)
+    pct_axis(axes[1])
+    tidy(axes[1])
+    top = titles(fig, "How long a game lasts",
+                 "Left: the three board styles sit almost on top of each other. Right: the "
+                 "same games split into wins and losses — the spike at the short end is "
+                 "entirely losses, and the hump is entirely wins.")
+    fig.tight_layout(rect=(0, 0, 1, top))
+    return fig
+
+
+def _first_guess_panels(g, r, models, title, subtitle):
+    fig, axes = plt.subplots(1, 3, figsize=(12.2, 4.4), sharey=True)
+    done = g[g.outcome.isin(["win", "loss"])]
+    for j, style in enumerate(STYLE_ORDER):
+        ax = axes[j]
+        rs = r[r.board_style == style]
+        x = np.arange(len(models))
+        w = 0.36
+        hits = [rs[rs.cm == m].first_guess_hit.mean() for m in models]
+        base = [rs[rs.cm == m].first_guess_baseline.mean() for m in models]
+        ax.bar(x - w / 2, hits, width=w * 0.9,
+               color=[model_colors(models)[m] for m in models], zorder=3)
+        ax.bar(x + w / 2, base, width=w * 0.9, color=BASELINE, zorder=3)
+        for xi, (h, b) in enumerate(zip(hits, base)):
+            ax.text(xi - w / 2, h + 0.012, f"{h:.2f}", ha="center", va="bottom",
+                    fontsize=7.6, color=INK)
+            ax.text(xi + w / 2, b + 0.012, f"{b:.2f}", ha="center", va="bottom",
+                    fontsize=7.6, color=INK_2)
+            ax.text(xi, max(h, b) + 0.085, f"+{h - b:.2f}", ha="center", va="bottom",
+                    fontsize=8.6, color=INK, fontweight="bold")
+        ax.set_xticks(x)
+        ax.set_xticklabels([m.replace("-instruct", "") for m in models], fontsize=7.6,
+                           color=INK_2, rotation=20, ha="right")
+        ax.set_title(f"{STYLE_LABEL[style].splitlines()[0]}\n"
+                     f"{board_note(done[done.board_style == style])}",
+                     fontsize=9.5, color=INK, pad=8)
+        ax.set_ylim(0, 0.86)
+        tidy(ax)
+    axes[0].set_ylabel("share of first guesses on a target", fontsize=9)
+    handles = [Patch(facecolor=SERIES[0], label="observed first guess"),
+               Patch(facecolor=BASELINE, label="chance, given the pool at that moment")]
+    fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False, fontsize=8.5,
+               labelcolor=INK_2, bbox_to_anchor=(0.5, -0.02))
+    top = titles(fig, title, subtitle)
+    fig.tight_layout(rect=(0, 0.07, 1, top))
+    return fig
+
+
+def fig_first_guess_labeled(g, r):
+    return _first_guess_panels(
+        g, r, MODEL_ORDER,
+        "First guess against chance, by codemaster and board style",
+        "Coloured bar: how often the round's first guess landed on a target. Grey bar: the "
+        "chance of that, given the words still standing. The bold number is the gap.")
+
+
+def fig_first_guess_subset(g, r):
+    gs = two_model_subset(g)
+    keys = ["run_id", "model", "guesser_model", "method", "count_constraint",
+            "board_style", "board_seed", "trial"]
+    rs = r.merge(gs[keys].drop_duplicates(), on=keys, how="inner")
+    return _first_guess_panels(
+        gs, rs, SUBSET_MODELS,
+        "First guess against chance — the two-model grid on all 450 boards",
+        "gemini-2.5-flash and gpt-4o-mini in both roles, pooled over the factorial's 30 "
+        "boards per style and the top-up's 120, so each column rests on 150 boards.")
+
+
+def fig_ambition_free(g, r):
+    """Clue ambition over the course of a game, free-choice arm only."""
+    free = r[r.count_constraint == "free"]
+    fig, ax = plt.subplots(figsize=(8.4, 4.4))
+    cols = model_colors(MODEL_ORDER)
+    for m in MODEL_ORDER:
+        s = free[free.cm == m]
+        by_round = s.groupby("round")["count"].agg(["mean", "size"])
+        by_round = by_round[(by_round["size"] >= 30) & (by_round.index <= 16)]
+        ax.plot(by_round.index, by_round["mean"], lw=2, color=cols[m], label=m, zorder=3,
+                marker="o", markersize=3.4)
+    ax.set_xlabel("round", fontsize=9)
+    ax.set_ylabel("mean clue number", fontsize=9)
+    ax.set_xticks(range(2, 17, 2))
+    ax.legend(frameon=False, fontsize=8.5, labelcolor=INK_2)
+    tidy(ax)
+    done = g[g.outcome.isin(["win", "loss"])]
+    top = titles(fig, "Clue ambition falls as the board empties",
+                 "Free-choice arm only, so nothing here is imposed by a floor. Points rest on "
+                 f"at least 30 rounds. {done.board_seed.nunique() * 3} boards across the three "
+                 "styles.")
+    fig.tight_layout(rect=(0, 0, 1, top))
+    return fig
+
+
+def fig_outcome_mix_subset(g):
+    gs = two_model_subset(g)
+    classes = ["win", "loss_assassin", "loss_opponent", "incomplete"]
+    colors = dict(zip(classes, SERIES))
+    fig, axes = plt.subplots(1, 3, figsize=(11.6, 4.4), sharey=True)
+    for j, style in enumerate(STYLE_ORDER):
+        ax = axes[j]
+        sub = gs[gs.board_style == style]
+        x = np.arange(len(SUBSET_MODELS))
+        bottom = np.zeros(len(SUBSET_MODELS))
+        for c in classes:
+            vals = np.array([(sub[sub.gs == m].outcome_class == c).mean()
+                             for m in SUBSET_MODELS])
+            ax.bar(x, vals, bottom=bottom, width=0.5, color=colors[c], zorder=3,
+                   edgecolor=SURFACE, linewidth=2, label=OUTCOME_LABEL[c] if j == 0 else None)
+            for xi, (b, v) in enumerate(zip(bottom, vals)):
+                if v > 0.05:
+                    ax.text(xi, b + v / 2, f"{v:.0%}", ha="center", va="center",
+                            fontsize=8, color="white")
+            bottom += vals
+        ax.set_xticks(x)
+        ax.set_xticklabels(SUBSET_MODELS, fontsize=8.2, color=INK_2)
+        ax.set_title(f"{STYLE_LABEL[style].splitlines()[0]}\n{board_note(sub)}",
+                     fontsize=9.5, color=INK, pad=8)
+        ax.set_ylim(0, 1)
+        pct_axis(ax)
+        tidy(ax)
+    axes[0].set_ylabel("share of games", fontsize=9)
+    axes[0].set_xlabel("guesser", fontsize=9)
+    fig.legend(loc="lower center", ncol=4, frameon=False, fontsize=8.5, labelcolor=INK_2,
+               bbox_to_anchor=(0.5, -0.02))
+    top = titles(fig, "How games end — the two-model grid on all 450 boards",
+                 "gemini-2.5-flash and gpt-4o-mini in both roles, pooled over both runs. "
+                 "Columns are board style; bars are the guesser.")
+    fig.tight_layout(rect=(0, 0.07, 1, top))
+    return fig
+
+
+
+# The six ambiguous words the report walks through. Each has two unrelated
+# readings of one unvocalized written form, which is the phenomenon the whole
+# project is about.
+GLOSS_WORDS = ["מטר", "מלח", "כבד", "קל", "אלים", "אלה"]
+
+
+def english_pair_frame(g, r):
+    """The pair table in the column order of Table I of the English benchmark."""
+    raw = pair_table(g, r).copy()
+    raw["cm"] = raw["model"].map(short)
+    raw["gs"] = raw["guesser_model"].map(short)
+    raw["_c"] = raw["cm"].map({m: i for i, m in enumerate(MODEL_ORDER)})
+    raw["_g"] = raw["gs"].map({m: i for i, m in enumerate(MODEL_ORDER)})
+    raw = raw.sort_values(["_c", "_g"], ignore_index=True)
+
+    def pair(m, s, fmt="{:.2f}"):
+        return [f"{fmt.format(a)} ({fmt.format(b)})" for a, b in zip(raw[m], raw[s])]
+
+    out = pd.DataFrame({
+        "Model pair (codemaster – guesser)": raw["cm"] + " – " + raw["gs"],
+        "Games": [f"{n:,}" for n in raw["games"]],
+        "Mean": [f"{v:.2f}" for v in raw["length_mean"]],
+        "Median": [f"{v:.0f}" for v in raw["length_median"]],
+        "Min": [f"{v:.0f}" for v in raw["length_min"]],
+        "Std Dev": [f"{v:.2f}" for v in raw["length_sd"]],
+        "Loss": [f"{v:.0%}" for v in raw["loss_rate"]],
+        "Mean (without loss)": [f"{v:.2f}" for v in raw["length_mean_wins"]],
+        "Opponent avg(sd)": pair("opponent_mean", "opponent_sd"),
+        "Civilian avg(sd)": pair("civilian_mean", "civilian_sd"),
+        "Clues avg(sd)": pair("clue_count_mean", "clue_count_sd"),
+        "Guesses avg(sd)": pair("guesses_mean", "guesses_sd"),
+        "Stop Early": [f"{v:.1%}" for v in raw["stop_early_rate"]],
+        "Stop Late": [f"{v:.1%}" for v in raw["stop_late_rate"]],
+    })
+    return out
+
+
+def fig_pair_table_english(g, r):
+    out = english_pair_frame(g, r)
+    fig, ax = plt.subplots(figsize=(15.4, 5.6))
+    ax.axis("off")
+    # The pair name needs roughly twice a data column; equal widths truncate it.
+    n_data = len(out.columns) - 1
+    widths = [0.175] + [(1 - 0.175) / n_data] * n_data
+    tbl = ax.table(cellText=out.values.tolist(), colLabels=list(out.columns),
+                   loc="center", cellLoc="center", colWidths=widths)
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(7.4)
+    tbl.scale(1, 1.5)
+    for (rr, cc), cell in tbl.get_celld().items():
+        cell.set_edgecolor(GRID)
+        cell.set_linewidth(0.6)
+        if rr == 0:
+            cell.set_facecolor("#f0efec")
+            cell.set_text_props(color=INK, fontweight="bold")
+        else:
+            # A rule between codemaster blocks, as the paper prints it.
+            cell.set_facecolor(SURFACE if ((rr - 1) // 4) % 2 == 0 else "#f7f6f3")
+            cell.set_text_props(color=INK_2)
+        if cc == 0:
+            cell.set_text_props(ha="left")
+    top = titles(fig, "Agent results for the single-team Hebrew version",
+                 "One row per codemaster–guesser pair, in the column order of Table I of the "
+                 "English benchmark, ordered by codemaster then guesser. Length columns are "
+                 "rounds; Opponent and Civilian are words revealed per game; Stop Early and "
+                 "Stop Late are over eligible rounds.")
+    fig.tight_layout(rect=(0, 0, 1, top))
+    return fig
+
+
+def fig_gloss(g, r):
+    """Which English sense each codemaster reaches for, for six ambiguous words."""
+    counts = gloss_counts([f"results/{FACTORIAL}"], words=GLOSS_WORDS)
+    shares = sense_shares(counts)
+    models = [m for m in sorted(shares.model.unique(),
+                                key=lambda x: MODEL_ORDER.index(short(x)))]
+    rounds = int(shares["rounds"].sum())
+    unrel = float((shares["share_unrelated"] * shares["rounds"]).sum() / rounds)
+    fig = plots.gloss_sense_split(
+        shares, GLOSS_WORDS, models,
+        title="Which English sense does each codemaster reach for?",
+        subtitle=f"English-Pivot rounds on the factorial — {rounds:,} board-word glosses. "
+                 f"Grey = the model named both senses; a bar short of full width means it "
+                 f"named neither ({unrel:.0%} overall).",
+    )
+    return fig
+
+
 # `scope` says which dataset a figure reads: "factorial" or "pooled".
 FIGURES = {
     "fig01_role_headline": ("factorial", lambda g, r: fig_role_headline(g)),
@@ -545,6 +872,15 @@ FIGURES = {
     "fig09_board_spread": ("pooled", lambda g, r: fig_board_spread(g)),
     "fig10_trajectory": ("factorial", fig_trajectory),
     "fig11_stopping": ("factorial", fig_stopping),
+    # The selected set.
+    "fig21_method_style_grid": ("factorial", lambda g, r: fig_method_style_grid(g)),
+    "fig22_length_by_style": ("pooled", lambda g, r: fig_length_by_style(g)),
+    "fig23_first_guess_labeled": ("factorial", fig_first_guess_labeled),
+    "fig24_ambition_free": ("factorial", fig_ambition_free),
+    "fig25_outcome_mix_subset": ("pooled", lambda g, r: fig_outcome_mix_subset(g)),
+    "fig26_first_guess_subset": ("pooled", fig_first_guess_subset),
+    "fig27_pair_table_english": ("factorial", fig_pair_table_english),
+    "fig28_gloss_sense_split": ("factorial", fig_gloss),
 }
 
 
