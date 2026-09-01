@@ -553,10 +553,10 @@ FIGURES = {
 # design rather than averaged over it, which is exactly what the pooled figures
 # above cannot show. The ones left out duplicate a pooled figure.
 RUN_FIGURES = {
-    "fig12_length_distribution": "02_game_length",
+    "fig12_win_rate_full_grid": "04_win_rate_by_guesser",
     "fig13_win_rate_by_floor": "03_win_rate_by_floor",
-    "fig14_win_rate_by_guesser": "04_win_rate_by_guesser",
-    "fig15_outcome_mix_by_guesser": "06_outcome_mix_by_guesser",
+    "fig14_outcome_mix_by_guesser": "06_outcome_mix_by_guesser",
+    "fig15_length_distribution": "02_game_length",
     "fig16_first_guess_vs_chance": "09_first_guess_vs_chance",
     "fig17_ambition_by_round": "11_count_by_round",
     "fig18_self_consistency": "12_self_consistency",
