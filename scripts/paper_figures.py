@@ -27,7 +27,12 @@ import pandas as pd  # noqa: E402
 from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 
+from codenames_heb import plots  # noqa: E402
 from codenames_heb.analysis import load_runs  # noqa: E402
+from codenames_heb.palette import (  # noqa: E402
+    BASELINE, GRID, INK, INK_2, MUTED, SEQ_BLUE, SERIES, STYLE_RAMP, SURFACE,
+    MODEL_ORDER as _FULL_MODEL_ORDER, display_model,
+)
 
 RUNS = [
     "results/20260823T191234131145Z",
@@ -41,20 +46,9 @@ RUNS = [
 # pool the two.
 FACTORIAL = "20260823T191234131145Z"
 
-# --- validated palette (see dataviz/references/palette.md, light mode) -------
-SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]
-SURFACE = "#fcfcfb"
-INK = "#0b0b0b"
-INK_2 = "#52514e"
-MUTED = "#898781"
-GRID = "#e1e0d9"
-BASELINE = "#c3c2b7"
-SEQ_BLUE = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"]
-BLUES = LinearSegmentedColormap.from_list("seq_blue", SEQ_BLUE)
-# Board style is an ordinal ladder, so it gets an ordinal ramp rather than
-# categorical slots — which also keeps the categorical hues meaning "model"
-# in every figure of the document. Steps chosen to clear 2:1 on the surface.
-STYLE_RAMP = ["#86b6ef", "#2a78d6", "#104281"]
+# The palette lives in `codenames_heb.palette` so the run-report figures and
+# these paper figures give a model the same colour.
+BLUES = LinearSegmentedColormap.from_list("seq_blue", list(SEQ_BLUE))
 
 STYLE_ORDER = ["dual_0", "natural", "dual_100"]
 STYLE_LABEL = {"dual_0": "dual_0\n(no ambiguity)", "natural": "natural\n(a real deal)",
@@ -86,13 +80,8 @@ plt.rcParams.update({
 })
 
 
-# Display names: the full OpenRouter id is too wide for a 16-row table cell.
-_RENAME = {"llama-3.3-70b-instruct": "llama-3.3-70b"}
-
-
 def short(name) -> str:
-    base = str(name).split("/")[-1].replace(":free", "")
-    return _RENAME.get(base, base)
+    return display_model(name)
 
 
 def tidy(ax, *, ygrid=True, xgrid=False):
@@ -132,7 +121,7 @@ def load() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 # Colour follows the model, never its rank in the current chart: a figure that
 # sorts by a different metric must not repaint the bars.
-MODEL_ORDER = ["gemini-2.5-flash", "gpt-4o-mini", "llama-3.3-70b", "qwen3.5-9b"]
+MODEL_ORDER = [display_model(m) for m in _FULL_MODEL_ORDER]
 MODEL_COLORS = dict(zip(MODEL_ORDER, SERIES))
 
 
@@ -559,6 +548,22 @@ FIGURES = {
 }
 
 
+# The run-report figures (`codenames_heb.plots`) that earn a place in the paper.
+# Each is a stratified grid — it shows an effect *inside* every cell of the
+# design rather than averaged over it, which is exactly what the pooled figures
+# above cannot show. The ones left out duplicate a pooled figure.
+RUN_FIGURES = {
+    "fig12_length_distribution": "02_game_length",
+    "fig13_win_rate_by_floor": "03_win_rate_by_floor",
+    "fig14_win_rate_by_guesser": "04_win_rate_by_guesser",
+    "fig15_outcome_mix_by_guesser": "06_outcome_mix_by_guesser",
+    "fig16_first_guess_vs_chance": "09_first_guess_vs_chance",
+    "fig17_ambition_by_round": "11_count_by_round",
+    "fig18_self_consistency": "12_self_consistency",
+    "fig19_cross_model_agreement": "13_cross_model_agreement",
+}
+
+
 def main(out_dir: str = "docs/paper_figures") -> None:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -570,6 +575,19 @@ def main(out_dir: str = "docs/paper_figures") -> None:
         fig = build(*data[scope])
         path = out / f"{name}.png"
         fig.savefig(path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        print("wrote", path)
+
+    # The stratified grids, rendered off the factorial run for the same
+    # balance reason the pooled figures use it.
+    factorial = load_runs([RUNS[0]])
+    for name, key in RUN_FIGURES.items():
+        fig = plots.FIGURES[key](factorial)
+        if fig is None:
+            print("skipped", name)
+            continue
+        path = out / f"{name}.png"
+        fig.savefig(path, dpi=170, bbox_inches="tight")
         plt.close(fig)
         print("wrote", path)
 

@@ -41,8 +41,10 @@ FACET_HEIGHT = 3.7
 # full height is taller than it is wide, which no page wants.
 GRID_ROW_HEIGHT = 3.1
 
-# Fixed colours so a model keeps its colour across every figure.
-_MODEL_COLORS = plt.get_cmap("tab10").colors
+# Fixed colours so a model keeps its colour across every figure — and across
+# every figure in the *paper*, which is why the mapping lives in `palette`
+# rather than here.
+from codenames_heb.palette import colors_for as _palette_colors_for  # noqa: E402
 _OUTCOME_COLORS = {"win": "#2e7d32", "loss": "#c62828", "failed": "#9e9e9e"}
 _METHOD_HATCH = {"strong_hebrew": "", "translate_pipeline": "//"}
 
@@ -82,7 +84,7 @@ def _actor_column(df: pd.DataFrame) -> str:
 
 
 def _colors_for(models: Sequence) -> dict:
-    return {m: _MODEL_COLORS[i % len(_MODEL_COLORS)] for i, m in enumerate(models)}
+    return _palette_colors_for(models)
 
 
 def annotate_n(ax, positions, counts, *, y, fontsize: int = 7, color: str = "#555555"):
