@@ -1,7 +1,12 @@
 """Emit Overleaf-ready LaTeX for the report's figures and its pair table.
 
 Writes `docs/paper_figures.tex`. Paste the body into the paper and upload
-`docs/paper_figures/*.png` to a `figures/` folder in the Overleaf project.
+`docs/paper_figures_bare/*.png` to a `figures/` folder in the Overleaf project
+— the *bare* set, which carries no title or subtitle of its own, because the
+caption below each figure says all of that in the document's own type.
+
+`docs/paper_figures/` holds the same figures with their titles burnt in, for
+reading in `paper.md`. Do not upload those: the title would then appear twice.
 
 Usage: PYTHONPATH=src:. python scripts/paper_latex.py
 """
@@ -130,6 +135,10 @@ PREAMBLE = r"""% ---------------------------------------------------------------
 % \usepackage{booktabs}   % \toprule \midrule \bottomrule
 % \usepackage{graphbox}   % (optional) nothing here needs it
 % \graphicspath{{figures/}}
+%
+% Upload docs/paper_figures_bare/*.png as figures/ -- that set has no title or
+% subtitle drawn on it, because \caption supplies both. Its type is scaled up
+% 1.45x so it stays legible after the figure is shrunk to \linewidth.
 %
 % HEBREW: the discussion quotes Hebrew words. pdfLaTeX cannot set them.
 % Compile with XeLaTeX or LuaLaTeX (Overleaf: Menu -> Compiler) and add:

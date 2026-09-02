@@ -35,6 +35,20 @@ from codenames_heb.palette import (  # noqa: E402
     MODEL_ORDER as _FULL_MODEL_ORDER, display_model,
 )
 
+# --- output mode -----------------------------------------------------------
+# `--bare` drops the in-figure title block (the caption is written in LaTeX
+# instead) and scales every remaining piece of text up, because a figure that
+# is 12in wide here is rendered at ~7in in a two-column template: a 9pt label
+# lands near 5pt on the page, which is unreadable.
+BARE = False
+FONT_SCALE = 1.0
+
+
+def fs(size: float) -> float:
+    """A point size, scaled for the current output mode."""
+    return size * FONT_SCALE
+
+
 RUNS = [
     "results/20260823T191234131145Z",
     "results/20260829T225350499567Z",
@@ -65,7 +79,7 @@ OUTCOME_LABEL = {
 
 plt.rcParams.update({
     "font.family": ["Helvetica Neue", "Helvetica", "Arial", "DejaVu Sans"],
-    "font.size": 9,
+    "font.size": 9,  # replaced in main() when scaling
     "figure.facecolor": SURFACE,
     "axes.facecolor": SURFACE,
     "axes.edgecolor": BASELINE,
@@ -96,11 +110,17 @@ def tidy(ax, *, ygrid=True, xgrid=False):
 
 
 def titles(fig, title, subtitle):
-    """Title block measured in inches, so the gap holds at any figure height."""
+    """Title block measured in inches, so the gap holds at any figure height.
+
+    Returns the top of the area the axes may use. In bare mode nothing is
+    drawn and the axes get the whole figure.
+    """
+    if BARE:
+        return 1.0
     h = fig.get_figheight()
-    fig.text(0.012, 1 - 0.26 / h, title, ha="left", va="top", fontsize=12.5,
+    fig.text(0.012, 1 - 0.26 / h, title, ha="left", va="top", fontsize=fs(12.5),
              fontweight="bold", color=INK)
-    fig.text(0.012, 1 - 0.52 / h, subtitle, ha="left", va="top", fontsize=9, color=INK_2)
+    fig.text(0.012, 1 - 0.52 / h, subtitle, ha="left", va="top", fontsize=fs(9), color=INK_2)
     return 1 - 0.86 / h
 
 
@@ -143,12 +163,12 @@ def bar_panel(ax, labels, values, colors, *, fmt="{:.0%}", title="", ylabel="", 
     ax.bar(x, values, width=0.52, color=colors, zorder=3)
     for xi, v in zip(x, values):
         ax.text(xi, v + max(values) * 0.02, fmt.format(v), ha="center", va="bottom",
-                fontsize=9, color=INK, fontweight="normal")
+                fontsize=fs(9), color=INK, fontweight="normal")
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=8.5, color=INK_2)
+    ax.set_xticklabels(labels, fontsize=fs(8.5), color=INK_2)
     ax.set_ylim(0, max(values) * (1 + pad))
-    ax.set_ylabel(ylabel, fontsize=9)
-    ax.set_title(title, fontsize=10, color=INK, loc="left", pad=8)
+    ax.set_ylabel(ylabel, fontsize=fs(9))
+    ax.set_title(title, fontsize=fs(10), color=INK, loc="left", pad=8)
     if fmt.endswith("%}"):
         pct_axis(ax)
     tidy(ax)
@@ -166,12 +186,12 @@ def grouped_panel(ax, groups, series, colors, *, fmt="{:.0%}", title="", ylabel=
         ax.bar(x + off, vals, width=w * 0.9, color=colors[name], zorder=3, label=name)
         for xi, v in zip(x, vals):
             ax.text(xi + off, v + top * 0.02, fmt.format(v), ha="center", va="bottom",
-                    fontsize=7.2, color=INK_2, rotation=label_rot)
+                    fontsize=fs(7.2), color=INK_2, rotation=label_rot)
     ax.set_xticks(x)
-    ax.set_xticklabels(groups, fontsize=8.5, color=INK_2)
+    ax.set_xticklabels(groups, fontsize=fs(8.5), color=INK_2)
     ax.set_ylim(0, top * 1.18)
-    ax.set_ylabel(ylabel, fontsize=9)
-    ax.set_title(title, fontsize=10, color=INK, loc="left", pad=8)
+    ax.set_ylabel(ylabel, fontsize=fs(9))
+    ax.set_title(title, fontsize=fs(10), color=INK, loc="left", pad=8)
     if fmt.endswith("%}"):
         pct_axis(ax)
     tidy(ax)
@@ -215,17 +235,17 @@ def fig_outcome_composition(g):
         for xi, (b, v) in enumerate(zip(bottom, vals)):
             if v > 0.045:
                 ax.text(xi, b + v / 2, f"{v:.0%}", ha="center", va="center",
-                        fontsize=8, color="white", fontweight="normal")
+                        fontsize=fs(8), color="white", fontweight="normal")
         bottom += vals
     ax.set_xticks(x)
-    ax.set_xticklabels(order, fontsize=8.5, color=INK_2)
+    ax.set_xticklabels(order, fontsize=fs(8.5), color=INK_2)
     ax.set_ylim(0, 1)
     ax.set_yticks([0, .25, .5, .75, 1])
     ax.set_yticklabels(["0%", "25%", "50%", "75%", "100%"])
-    ax.set_ylabel("share of all games", fontsize=9)
+    ax.set_ylabel("share of all games", fontsize=fs(9))
     tidy(ax)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.09), ncol=4, frameon=False,
-              fontsize=8.5, labelcolor=INK_2)
+              fontsize=fs(8.5), labelcolor=INK_2)
     top = titles(fig, "How games end, by codemaster",
            "All games including those that never played out. The two loss kinds are separated: "
            "one assassin hit ends a game outright, opponent-word losses accumulate.")
@@ -246,15 +266,15 @@ def _heat(ax, mat, rows, cols, *, fmt, title, cmap=BLUES):
             if np.isnan(v):
                 continue
             shade = (v - lo) / (hi - lo) if hi > lo else 0.5
-            ax.text(j, i, fmt.format(v), ha="center", va="center", fontsize=8.5,
+            ax.text(j, i, fmt.format(v), ha="center", va="center", fontsize=fs(8.5),
                     color="white" if shade > 0.55 else INK)
     ax.set_xticks(range(len(cols)))
-    ax.set_xticklabels(cols, fontsize=8, color=INK_2, rotation=20, ha="right")
+    ax.set_xticklabels(cols, fontsize=fs(8), color=INK_2, rotation=20, ha="right")
     ax.set_yticks(range(len(rows)))
-    ax.set_yticklabels(rows, fontsize=8, color=INK_2)
-    ax.set_xlabel("Guesser", fontsize=9)
-    ax.set_ylabel("Codemaster", fontsize=9)
-    ax.set_title(title, fontsize=10, color=INK, loc="left", pad=8)
+    ax.set_yticklabels(rows, fontsize=fs(8), color=INK_2)
+    ax.set_xlabel("Guesser", fontsize=fs(9))
+    ax.set_ylabel("Codemaster", fontsize=fs(9))
+    ax.set_title(title, fontsize=fs(10), color=INK, loc="left", pad=8)
     ax.grid(False)
     for s in ax.spines.values():
         s.set_visible(False)
@@ -352,7 +372,7 @@ def _factor_figure(g, column, levels, level_labels, title, subtitle, *, colors=N
         cols, fmt="{:.1f}", title="Rounds to win", ylabel="mean rounds (wins only)")
     handles = [Patch(facecolor=cols[m], label=m) for m in models]
     fig.legend(handles=handles, loc="lower center", ncol=len(models), frameon=False,
-               fontsize=8.5, labelcolor=INK_2, bbox_to_anchor=(0.5, -0.015))
+               fontsize=fs(8.5), labelcolor=INK_2, bbox_to_anchor=(0.5, -0.015))
     top = titles(fig, title, subtitle)
     fig.tight_layout(rect=(0, 0.07, 1, top))
     return fig
@@ -398,15 +418,15 @@ def fig_ambition(g, r):
             ax.bar(x + (i - (len(models) - 1) / 2) * w, vals, width=w * 0.9,
                    color=cols[m], zorder=3, label=m)
         ax.set_xticks(x)
-        ax.set_xticklabels([str(c) for c in counts[:-1]] + ["5+"], fontsize=8.5)
-        ax.set_title(floor, fontsize=10, color=INK, loc="left", pad=8)
-        ax.set_xlabel("clue number", fontsize=9)
+        ax.set_xticklabels([str(c) for c in counts[:-1]] + ["5+"], fontsize=fs(8.5))
+        ax.set_title(floor, fontsize=fs(10), color=INK, loc="left", pad=8)
+        ax.set_xlabel("clue number", fontsize=fs(9))
         pct_axis(ax)
         tidy(ax)
-    axes[0].set_ylabel("share of rounds", fontsize=9)
+    axes[0].set_ylabel("share of rounds", fontsize=fs(9))
     handles = [Patch(facecolor=cols[m], label=m) for m in models]
     fig.legend(handles=handles, loc="lower center", ncol=len(models), frameon=False,
-               fontsize=8.5, labelcolor=INK_2, bbox_to_anchor=(0.5, -0.02))
+               fontsize=fs(8.5), labelcolor=INK_2, bbox_to_anchor=(0.5, -0.02))
     top = titles(fig, "What the clue-count floor changes",
            "Distribution of the clue number the codemaster chose, per floor. A floor removes the "
            "small clues by construction; whether it produces good large ones is the question.")
@@ -431,12 +451,12 @@ def fig_board_spread(g):
                         color=SERIES[0], edgecolors="none", zorder=3)
         axes[0].plot([i - 0.28, i + 0.28], [vals.mean()] * 2, color=SERIES[1],
                      lw=2.4, zorder=4, solid_capstyle="round")
-        axes[0].text(i, 1.02, f"{vals.mean():.0%}", ha="center", fontsize=9, color=INK)
+        axes[0].text(i, 1.02, f"{vals.mean():.0%}", ha="center", fontsize=fs(9), color=INK)
     axes[0].set_xticks(range(len(STYLE_ORDER)))
-    axes[0].set_xticklabels([STYLE_LABEL[s] for s in STYLE_ORDER], fontsize=8.5, color=INK_2)
+    axes[0].set_xticklabels([STYLE_LABEL[s] for s in STYLE_ORDER], fontsize=fs(8.5), color=INK_2)
     axes[0].set_ylim(0, 1.09)
-    axes[0].set_ylabel("win rate on that board", fontsize=9)
-    axes[0].set_title("Every board, by style", fontsize=10, color=INK, loc="left", pad=8)
+    axes[0].set_ylabel("win rate on that board", fontsize=fs(9))
+    axes[0].set_title("Every board, by style", fontsize=fs(10), color=INK, loc="left", pad=8)
     pct_axis(axes[0])
     tidy(axes[0])
 
@@ -446,11 +466,11 @@ def fig_board_spread(g):
         axes[1].hist(vals, bins=np.arange(0.5, max(lengths) + 1.5, 1), histtype="step",
                      lw=1.8, color=STYLE_RAMP[i], label=STYLE_LABEL[style].split("\n")[0],
                      density=True, zorder=3)
-    axes[1].set_xlabel("rounds played", fontsize=9)
-    axes[1].set_ylabel("share of games", fontsize=9)
-    axes[1].set_title("Game length", fontsize=10, color=INK, loc="left", pad=8)
+    axes[1].set_xlabel("rounds played", fontsize=fs(9))
+    axes[1].set_ylabel("share of games", fontsize=fs(9))
+    axes[1].set_title("Game length", fontsize=fs(10), color=INK, loc="left", pad=8)
     pct_axis(axes[1])
-    axes[1].legend(frameon=False, fontsize=8.5, labelcolor=INK_2)
+    axes[1].legend(frameon=False, fontsize=fs(8.5), labelcolor=INK_2)
     tidy(axes[1])
     top = titles(fig, "Board-to-board variation",
            "Each dot is one board's win rate over every game played on it; the bar is the style "
@@ -493,19 +513,19 @@ def fig_trajectory(g, r):
         alive = (alive / alive.iloc[0])[alive.index <= 14]
         axes[1].plot(alive.index, alive.values, lw=2, color=cols[m], label=m, zorder=3)
     axes[0].axhline(9, color=MUTED, lw=1, ls=(0, (4, 3)), zorder=2)
-    axes[0].text(1.2, 9.18, "all 9 targets — the board is won", fontsize=8, color=MUTED)
+    axes[0].text(1.2, 9.18, "all 9 targets — the board is won", fontsize=fs(8), color=MUTED)
     axes[0].set_ylim(0, 9.9)
-    axes[0].set_xlabel("round", fontsize=9)
-    axes[0].set_ylabel("targets revealed, cumulative", fontsize=9)
-    axes[0].set_title("How fast the board comes apart", fontsize=10, color=INK, loc="left",
+    axes[0].set_xlabel("round", fontsize=fs(9))
+    axes[0].set_ylabel("targets revealed, cumulative", fontsize=fs(9))
+    axes[0].set_title("How fast the board comes apart", fontsize=fs(10), color=INK, loc="left",
                       pad=8)
-    axes[1].set_xlabel("round", fontsize=9)
-    axes[1].set_ylabel("share of games still running", fontsize=9)
+    axes[1].set_xlabel("round", fontsize=fs(9))
+    axes[1].set_ylabel("share of games still running", fontsize=fs(9))
     axes[1].yaxis.set_major_formatter(lambda v, _: f"{v:.0%}")
-    axes[1].set_title("Games still running", fontsize=10, color=INK, loc="left", pad=8)
+    axes[1].set_title("Games still running", fontsize=fs(10), color=INK, loc="left", pad=8)
     for ax in axes:
         tidy(ax)
-    axes[0].legend(frameon=False, fontsize=8.5, labelcolor=INK_2, loc="lower right")
+    axes[0].legend(frameon=False, fontsize=fs(8.5), labelcolor=INK_2, loc="lower right")
     top = titles(fig, "How a game unfolds, by codemaster",
                  "Left: mean targets revealed by the end of each round, over every game — a game "
                  "that has ended holds its final total, so the curve flattens as games die. "
@@ -552,8 +572,12 @@ def n_boards(df) -> int:
 
 
 def board_note(df) -> str:
-    """`90 boards · 4,217 games` — the denominator behind one column."""
-    return f"{n_boards(df)} boards · {len(df):,} games"
+    """The denominator behind one column, on two lines.
+
+    One line is too wide once the type is scaled up for print: three of these
+    side by side under a three-level axis run into each other.
+    """
+    return f"{n_boards(df)} boards\n{len(df):,} games"
 
 
 def two_model_subset(g):
@@ -604,7 +628,7 @@ def fig_factors_separately(g, models=None, *, title=None, subtitle=None):
             ax.set_ylim(0, row_max)
     handles = [Patch(facecolor=cols[m], label=m) for m in models]
     fig.legend(handles=handles, loc="lower center", ncol=len(models), frameon=False,
-               fontsize=8.5, labelcolor=INK_2, bbox_to_anchor=(0.5, -0.012))
+               fontsize=fs(8.5), labelcolor=INK_2, bbox_to_anchor=(0.5, -0.012))
     top = titles(
         fig,
         title or "The two designed factors, one panel each",
@@ -630,14 +654,14 @@ def fig_board_variance(g):
         ax.plot([i - 0.30, i + 0.30], [vals.mean()] * 2, color=SERIES[1], lw=2.6,
                 zorder=5, solid_capstyle="round")
         ax.plot([i, i], [q1, q3], color=SERIES[1], lw=1.2, zorder=4, alpha=0.8)
-        ax.text(i, 1.055, f"mean {vals.mean():.0%}", ha="center", fontsize=9, color=INK)
-        ax.text(i, 1.015, f"IQR {q1:.0%}–{q3:.0%}", ha="center", fontsize=8, color=MUTED)
+        ax.text(i, 1.055, f"mean {vals.mean():.0%}", ha="center", fontsize=fs(9), color=INK)
+        ax.text(i, 1.015, f"IQR {q1:.0%}–{q3:.0%}", ha="center", fontsize=fs(8), color=MUTED)
     ax.set_xticks(range(len(STYLE_ORDER)))
     ax.set_xticklabels([f"{STYLE_LABEL[s]}\n{board_note(done[done.board_style == s])}"
-                        for s in STYLE_ORDER], fontsize=8.6, color=INK_2)
+                        for s in STYLE_ORDER], fontsize=fs(8.6), color=INK_2)
     ax.set_ylim(-0.03, 1.12)
     ax.set_yticks([0, .25, .5, .75, 1])
-    ax.set_ylabel("win rate on that board", fontsize=9)
+    ax.set_ylabel("win rate on that board", fontsize=fs(9))
     pct_axis(ax)
     tidy(ax)
     top = titles(fig, "Board-to-board variation dwarfs every model effect",
@@ -658,10 +682,10 @@ def fig_length_by_style(g):
         axes[0].hist(sub.game_length, bins=bins, histtype="step", lw=1.9,
                      color=STYLE_RAMP[i], density=True, zorder=3,
                      label=f"{style} — {board_note(sub)}")
-    axes[0].set_xlabel("rounds played", fontsize=9)
-    axes[0].set_ylabel("share of games", fontsize=9)
-    axes[0].set_title("All games, by board style", fontsize=10, color=INK, loc="left", pad=8)
-    axes[0].legend(frameon=False, fontsize=7.6, labelcolor=INK_2)
+    axes[0].set_xlabel("rounds played", fontsize=fs(9))
+    axes[0].set_ylabel("share of games", fontsize=fs(9))
+    axes[0].set_title("All games, by board style", fontsize=fs(10), color=INK, loc="left", pad=8)
+    axes[0].legend(frameon=False, fontsize=fs(7.6), labelcolor=INK_2)
     pct_axis(axes[0])
     tidy(axes[0])
 
@@ -669,11 +693,11 @@ def fig_length_by_style(g):
                                 ("losses", done[done.is_win == 0], SERIES[1])]:
         axes[1].hist(frame.game_length, bins=bins, histtype="step", lw=1.9, color=color,
                      density=True, zorder=3, label=f"{label} ({len(frame):,} games)")
-    axes[1].set_xlabel("rounds played", fontsize=9)
-    axes[1].set_ylabel("share of games", fontsize=9)
-    axes[1].set_title("The same games, split by outcome", fontsize=10, color=INK,
+    axes[1].set_xlabel("rounds played", fontsize=fs(9))
+    axes[1].set_ylabel("share of games", fontsize=fs(9))
+    axes[1].set_title("The same games, split by outcome", fontsize=fs(10), color=INK,
                       loc="left", pad=8)
-    axes[1].legend(frameon=False, fontsize=8, labelcolor=INK_2)
+    axes[1].legend(frameon=False, fontsize=fs(8), labelcolor=INK_2)
     pct_axis(axes[1])
     tidy(axes[1])
     top = titles(fig, "How long a game lasts",
@@ -699,27 +723,27 @@ def _first_guess_panels(g, r, models, title, subtitle):
         ax.bar(x + w / 2, base, width=w * 0.9, color=BASELINE, zorder=3)
         for xi, (h, b) in enumerate(zip(hits, base)):
             ax.text(xi - w / 2, h + 0.012, f"{h:.2f}", ha="center", va="bottom",
-                    fontsize=7.6, color=INK)
+                    fontsize=fs(7.6), color=INK)
             ax.text(xi + w / 2, b + 0.012, f"{b:.2f}", ha="center", va="bottom",
-                    fontsize=7.6, color=INK_2)
+                    fontsize=fs(7.6), color=INK_2)
             ax.text(xi, max(h, b) + 0.085, f"+{h - b:.2f}", ha="center", va="bottom",
-                    fontsize=8.6, color=INK, fontweight="bold")
+                    fontsize=fs(8.6), color=INK, fontweight="bold")
         ax.set_xticks(x)
-        ax.set_xticklabels([m.replace("-instruct", "") for m in models], fontsize=7.6,
+        ax.set_xticklabels([m.replace("-instruct", "") for m in models], fontsize=fs(7.6),
                            color=INK_2, rotation=20, ha="right")
         ax.set_title(f"{STYLE_LABEL[style].splitlines()[0]}\n"
                      f"{board_note(done[done.board_style == style])}",
-                     fontsize=9.5, color=INK, pad=8)
+                     fontsize=fs(9.5), color=INK, pad=8)
         ax.set_ylim(0, 0.86)
         tidy(ax)
-    axes[0].set_ylabel("share of first guesses on a target", fontsize=9)
+    axes[0].set_ylabel("share of first guesses on a target", fontsize=fs(9))
     # The coloured bars carry model identity, so the legend has to name the
     # models — a single "observed" swatch would assert a colour no bar uses.
     cols = model_colors(models)
     handles = [Patch(facecolor=cols[m], label=f"{m} — observed") for m in models]
     handles.append(Patch(facecolor=BASELINE, label="chance, given the pool at that moment"))
     fig.legend(handles=handles, loc="lower center", ncol=len(handles), frameon=False,
-               fontsize=8.5, labelcolor=INK_2, bbox_to_anchor=(0.5, -0.02))
+               fontsize=fs(8.5), labelcolor=INK_2, bbox_to_anchor=(0.5, -0.02))
     top = titles(fig, title, subtitle)
     fig.tight_layout(rect=(0, 0.07, 1, top))
     return fig
@@ -756,10 +780,10 @@ def fig_ambition_free(g, r):
         by_round = by_round[(by_round["size"] >= 30) & (by_round.index <= 16)]
         ax.plot(by_round.index, by_round["mean"], lw=2, color=cols[m], label=m, zorder=3,
                 marker="o", markersize=3.4)
-    ax.set_xlabel("round", fontsize=9)
-    ax.set_ylabel("mean clue number", fontsize=9)
+    ax.set_xlabel("round", fontsize=fs(9))
+    ax.set_ylabel("mean clue number", fontsize=fs(9))
     ax.set_xticks(range(2, 17, 2))
-    ax.legend(frameon=False, fontsize=8.5, labelcolor=INK_2)
+    ax.legend(frameon=False, fontsize=fs(8.5), labelcolor=INK_2)
     tidy(ax)
     done = g[g.outcome.isin(["win", "loss"])]
     top = titles(fig, "Clue ambition falls as the board empties",
@@ -788,18 +812,18 @@ def fig_outcome_mix_subset(g):
             for xi, (b, v) in enumerate(zip(bottom, vals)):
                 if v > 0.05:
                     ax.text(xi, b + v / 2, f"{v:.0%}", ha="center", va="center",
-                            fontsize=8, color="white")
+                            fontsize=fs(8), color="white")
             bottom += vals
         ax.set_xticks(x)
-        ax.set_xticklabels(SUBSET_MODELS, fontsize=8.2, color=INK_2)
+        ax.set_xticklabels(SUBSET_MODELS, fontsize=fs(8.2), color=INK_2)
         ax.set_title(f"{STYLE_LABEL[style].splitlines()[0]}\n{board_note(sub)}",
-                     fontsize=9.5, color=INK, pad=8)
+                     fontsize=fs(9.5), color=INK, pad=8)
         ax.set_ylim(0, 1)
         pct_axis(ax)
         tidy(ax)
-    axes[0].set_ylabel("share of games", fontsize=9)
-    axes[0].set_xlabel("guesser", fontsize=9)
-    fig.legend(loc="lower center", ncol=4, frameon=False, fontsize=8.5, labelcolor=INK_2,
+    axes[0].set_ylabel("share of games", fontsize=fs(9))
+    axes[0].set_xlabel("guesser", fontsize=fs(9))
+    fig.legend(loc="lower center", ncol=4, frameon=False, fontsize=fs(8.5), labelcolor=INK_2,
                bbox_to_anchor=(0.5, -0.02))
     top = titles(fig, "How games end — the two-model grid on all 450 boards",
                  "gemini-2.5-flash and gpt-4o-mini in both roles, pooled over both runs. "
@@ -889,10 +913,12 @@ def fig_gloss(g, r):
     unrel = float((shares["share_unrelated"] * shares["rounds"]).sum() / rounds)
     fig = plots.gloss_sense_split(
         shares, GLOSS_WORDS, models,
-        title="Which English sense does each codemaster reach for?",
-        subtitle=f"English-Pivot rounds on the factorial — {rounds:,} board-word glosses. "
-                 f"Grey = the model named both senses; a bar short of full width means it "
-                 f"named neither ({unrel:.0%} overall).",
+        title=None if BARE else "Which English sense does each codemaster reach for?",
+        subtitle=None if BARE else (
+            f"English-Pivot rounds on the factorial — {rounds:,} board-word glosses. "
+            f"Grey = the model named both senses; a bar short of full width means it "
+            f"named neither ({unrel:.0%} overall)."),
+        font_scale=FONT_SCALE,
     )
     return fig
 
@@ -943,8 +969,12 @@ RUN_FIGURES = {
 }
 
 
-def main(out_dir: str = "docs/paper_figures") -> None:
-    out = Path(out_dir)
+def main(out_dir: str | None = None, bare: bool = False) -> None:
+    global BARE, FONT_SCALE
+    BARE = bare
+    FONT_SCALE = 1.45 if bare else 1.0
+    plt.rcParams["font.size"] = fs(9)
+    out = Path(out_dir or ("docs/paper_figures_bare" if bare else "docs/paper_figures"))
     out.mkdir(parents=True, exist_ok=True)
     games, rounds = load()
     fac_g, fac_r = games[games.run_id == FACTORIAL], rounds[rounds.run_id == FACTORIAL]
@@ -972,4 +1002,5 @@ def main(out_dir: str = "docs/paper_figures") -> None:
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:])
+    args = [a for a in sys.argv[1:] if a != "--bare"]
+    main(*args, bare="--bare" in sys.argv[1:])

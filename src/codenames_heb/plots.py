@@ -1261,7 +1261,8 @@ def _sense_frame(shares, words, models):
     return frame.sort_values(["_w", "_m"], ignore_index=True)
 
 
-def gloss_sense_split(shares, words, models, *, title=None, subtitle=None):
+def gloss_sense_split(shares, words, models, *, title=None, subtitle=None,
+                      font_scale: float = 1.0):
     """Diverging stacked bars: which sense each model defaults to, per word.
 
     One panel per word, one bar per model. The bar is centred on the midpoint of
@@ -1272,6 +1273,11 @@ def gloss_sense_split(shares, words, models, *, title=None, subtitle=None):
     labelled rather than hidden.
     """
     frame = _sense_frame(shares, words, models)
+
+    def fs(size: float) -> float:
+        """A point size, scaled for the caller's output size."""
+        return size * font_scale
+
     ncols = 3
     nrows = -(-len(words) // ncols)
     fig, axes = plt.subplots(
@@ -1322,10 +1328,10 @@ def gloss_sense_split(shares, words, models, *, title=None, subtitle=None):
         ax.set_xlim(-1.02, 1.02)
         ax.set_ylim(-len(models) + 0.45, 0.55)
         ax.set_yticks([-j for j in range(len(models))])
-        ax.set_yticklabels(tick_labels, fontsize=7.4, color=GLOSS_INK_2)
+        ax.set_yticklabels(tick_labels, fontsize=fs(7.4), color=GLOSS_INK_2)
         ax.set_xticks([-1, -0.5, 0, 0.5, 1])
-        ax.set_xticklabels(["100%", "50%", "", "50%", "100%"], fontsize=6.4, color=GLOSS_MUTED)
-        ax.set_title(f"{word}      {a_label} ‹ › {b_label}", fontsize=9.5, color=GLOSS_INK,
+        ax.set_xticklabels(["100%", "50%", "", "50%", "100%"], fontsize=fs(6.4), color=GLOSS_MUTED)
+        ax.set_title(f"{word}      {a_label} ‹ › {b_label}", fontsize=fs(9.5), color=GLOSS_INK,
                      pad=6)
         ax.tick_params(length=0)
         for side in ("top", "right", "left", "bottom"):
@@ -1343,7 +1349,7 @@ def gloss_sense_split(shares, words, models, *, title=None, subtitle=None):
     ]
     fig.legend(handles, ["first sense (left label)", "both named — the model hedged",
                          "second sense (right label)"],
-               loc="lower center", ncol=3, frameon=False, fontsize=8.5,
+               loc="lower center", ncol=3, frameon=False, fontsize=fs(8.5),
                bbox_to_anchor=(0.5, 0.002))
     # Title block placed in inches, not figure fractions: a two-row grid is
     # about half the height of a four-row one, and a fixed fraction puts the
@@ -1351,12 +1357,12 @@ def gloss_sense_split(shares, words, models, *, title=None, subtitle=None):
     height = fig.get_figheight()
     top = 1.0
     if title:
-        fig.text(0.5, 1 - 0.24 / height, title, ha="center", va="top", fontsize=13,
+        fig.text(0.5, 1 - 0.24 / height, title, ha="center", va="top", fontsize=fs(13),
                  color=GLOSS_INK)
         top = 1 - 0.46 / height
     if subtitle:
         y = 1 - (0.52 if title else 0.24) / height
-        fig.text(0.5, y, subtitle, ha="center", va="top", fontsize=8.5,
+        fig.text(0.5, y, subtitle, ha="center", va="top", fontsize=fs(8.5),
                  color=GLOSS_INK_2, wrap=True)
         top = 1 - ((0.94 if title else 0.62) / height)
     fig.tight_layout(rect=(0, 0.045, 1, top))
