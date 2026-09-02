@@ -320,6 +320,84 @@ def fig_pair_matrix(g):
     return fig
 
 
+def fig_pair_matrix_margins(g):
+    """The pair grid with each model's overall performance on the margin.
+
+    The extra column is a codemaster's mean across all four guessers; the extra
+    row is a guesser's mean across all four codemasters; the corner is the
+    grand mean. They are painted on a grey ramp rather than the blue one so a
+    margin is never mistaken for a cell — a margin summarises the row or column
+    beside it and is not a pair anyone played.
+    """
+    done = g[g.outcome.isin(["win", "loss"])]
+    wins = done[done.is_win == 1]
+    models = MODEL_ORDER
+    n = len(models)
+
+    def grid(frame, metric):
+        m = np.full((n + 1, n + 1), np.nan)
+        for i, r in enumerate(models):
+            for j, c in enumerate(models):
+                sub = frame[(frame.cm == r) & (frame.gs == c)]
+                m[i, j] = sub[metric].mean() if len(sub) else np.nan
+            m[i, n] = frame[frame.cm == r][metric].mean()
+        for j, c in enumerate(models):
+            m[n, j] = frame[frame.gs == c][metric].mean()
+        m[n, n] = frame[metric].mean()
+        return m
+
+    greys = LinearSegmentedColormap.from_list(
+        "greys", ["#f0efec", "#c3c2b7", "#898781", "#52514e"])
+    fig, axes = plt.subplots(2, 1, figsize=(6.2, 9.4)) if HALF else \
+        plt.subplots(1, 2, figsize=(12.4, 5.0))
+    for ax, (frame, metric, fmt, title) in zip(axes, [
+        (done, "is_win", "{:.0%}", "Win rate  (darker = better)"),
+        (wins, "game_length", "{:.1f}", "Rounds to win  (darker = slower)"),
+    ]):
+        m = grid(frame, metric)
+        cells = m.copy(); cells[n, :] = np.nan; cells[:, n] = np.nan
+        marg = m.copy(); marg[:n, :n] = np.nan
+        for data, cmap in ((cells, BLUES), (marg, greys)):
+            cm = cmap.copy(); cm.set_bad(alpha=0)
+            ax.imshow(np.ma.masked_invalid(data), cmap=cm, aspect="auto")
+        lo, hi = np.nanmin(cells), np.nanmax(cells)
+        mlo, mhi = np.nanmin(marg), np.nanmax(marg)
+        for i in range(n + 1):
+            for j in range(n + 1):
+                v = m[i, j]
+                if np.isnan(v):
+                    continue
+                edge = i == n or j == n
+                rng = (mhi - mlo) if edge else (hi - lo)
+                base = mlo if edge else lo
+                shade = (v - base) / rng if rng else 0.5
+                ax.text(j, i, fmt.format(v), ha="center", va="center",
+                        fontsize=fs(8.5), fontweight="bold" if edge else "normal",
+                        color="white" if shade > 0.55 else INK)
+        # A gap between the grid and its margins, so the summary reads apart.
+        ax.axvline(n - 0.5, color=SURFACE, lw=4)
+        ax.axhline(n - 0.5, color=SURFACE, lw=4)
+        ax.set_xticks(range(n + 1))
+        ax.set_xticklabels(models + ["All\nguessers"], fontsize=fs(8),
+                           color=INK_2, rotation=20, ha="right")
+        ax.set_yticks(range(n + 1))
+        ax.set_yticklabels(models + ["All\ncodemasters"], fontsize=fs(8), color=INK_2)
+        ax.set_xlabel("Guesser", fontsize=fs(9))
+        ax.set_ylabel("Codemaster", fontsize=fs(9))
+        ax.set_title(title, fontsize=fs(10), color=INK, loc="left", pad=8)
+        ax.grid(False)
+        for s in ax.spines.values():
+            s.set_visible(False)
+        ax.tick_params(length=0)
+    top = titles(fig, "Every pair, with each model's overall performance",
+                 "The 16 pairs, plus a margin: the last column is a codemaster across all "
+                 "four guessers, the last row a guesser across all four codemasters, and "
+                 "the corner the grand mean. Margins are grey because they summarise a "
+                 "row or column rather than naming a pair that was played.")
+    fig.tight_layout(rect=(0, 0, 1, top))
+    return fig
+
+
 def fig_pair_table(g):
     """The English benchmark's Table I layout, rendered as a figure."""
     done = g[g.outcome.isin(["win", "loss"])]
@@ -872,6 +950,11 @@ def fig_outcome_mix_subset(g):
 # project is about.
 GLOSS_WORDS = ["מטר", "מלח", "כבד", "קל", "אלים", "אלה"]
 
+# A three-word cut for a figure that has to fit a smaller slot. One word the
+# models agree on, one they split on, and one where the strongest model is the
+# odd one out — the three readings the text actually argues from.
+GLOSS_WORDS_SHORT = ["מטר", "מלח", "אלים"]
+
 
 def english_pair_frame(g, r):
     """The pair table in the column order of Table I of the English benchmark."""
@@ -937,16 +1020,19 @@ def fig_pair_table_english(g, r):
     return fig
 
 
-def fig_gloss(g, r):
-    """Which English sense each codemaster reaches for, for six ambiguous words."""
-    counts = gloss_counts([f"results/{FACTORIAL}"], words=GLOSS_WORDS)
+def fig_gloss(g, r, words=None):
+    """Which English sense each codemaster reaches for, for ambiguous words."""
+    words = words or GLOSS_WORDS
+    counts = gloss_counts([f"results/{FACTORIAL}"], words=words)
     shares = sense_shares(counts)
     models = [m for m in sorted(shares.model.unique(),
                                 key=lambda x: MODEL_ORDER.index(short(x)))]
     rounds = int(shares["rounds"].sum())
     unrel = float((shares["share_unrelated"] * shares["rounds"]).sum() / rounds)
     fig = plots.gloss_sense_split(
-        shares, GLOSS_WORDS, models,
+        shares, words, models,
+        # Half-width slots take a single column of stacked panels.
+        ncols=1 if HALF else 3,
         title=None if BARE else "Which English sense does each codemaster reach for?",
         subtitle=None if BARE else (
             f"English-Pivot rounds on the factorial — {rounds:,} board-word glosses. "
@@ -987,6 +1073,9 @@ FIGURES = {
     "fig26_first_guess_subset": ("pooled", fig_first_guess_subset),
     "fig27_pair_table_english": ("factorial", fig_pair_table_english),
     "fig28_gloss_sense_split": ("factorial", fig_gloss),
+    "fig29_pair_matrix_margins": ("factorial", lambda g, r: fig_pair_matrix_margins(g)),
+    "fig30_gloss_three_words": ("factorial",
+                                lambda g, r: fig_gloss(g, r, GLOSS_WORDS_SHORT)),
 }
 
 

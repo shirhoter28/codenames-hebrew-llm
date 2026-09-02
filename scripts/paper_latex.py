@@ -41,6 +41,10 @@ PAIRS = [
      "number by round in the free-choice arm, where no floor is imposed.",
      [("fig22_board_variance", "Board-to-board variation"),
       ("fig24_ambition_free", "Clue ambition over a game")]),
+    ("newpair", "(a) the pair grid with each model's overall performance on the margin; "
+     "(b) three ambiguous Hebrew words and the English sense each codemaster assigned.",
+     [("fig29_pair_matrix_margins", "Pairs with margins"),
+      ("fig30_gloss_three_words", "Sense split, three words")]),
     ("firstguess", "First guess against the chance rate for the pool at that moment. "
      "(a) all four codemasters on the factorial; (b) the two-model grid on all 450 boards.",
      [("fig23_first_guess_labeled", "All four codemasters"),
@@ -86,6 +90,18 @@ FIGURES = [
     ("fig26_first_guess_subset", "firstguesssubset",
      "First guess against chance, two-model grid",
      "The same grid at the round level, on 150 boards per column."),
+    ("fig29_pair_matrix_margins", "pairsmargins",
+     "Every pair, with each model's overall performance",
+     "The 16 pairs, plus a margin: the last column is a codemaster's mean across all "
+     "four guessers, the last row a guesser's mean across all four codemasters, and the "
+     "corner cell the grand mean. Margins are painted on a separate grey ramp because "
+     "they summarise a row or column rather than naming a pair that was played."),
+    ("fig30_gloss_three_words", "glossshort",
+     "Which English sense each codemaster reaches for",
+     "Three ambiguous Hebrew words under English-Pivot: one the models agree on "
+     "(\\texthebrew{מלח}), one they split on (\\texthebrew{מטר}), and one where the "
+     "strongest model is the odd one out (\\texthebrew{אלים}). Grey is a gloss naming "
+     "both senses; a bar short of full width means the model named neither."),
     ("fig28_gloss_sense_split", "gloss",
      "Which English sense each codemaster reaches for",
      "Six ambiguous Hebrew words and the English sense each codemaster assigned "
@@ -96,7 +112,7 @@ FIGURES = [
 # These are wide; in a two-column template they need the starred environment.
 WIDE = {"fig03_pair_matrix", "fig21_factors_separately", "fig23_first_guess_labeled",
         "fig25_factors_subset", "fig26_first_guess_subset", "fig28_gloss_sense_split",
-        "fig01_role_headline"}
+        "fig01_role_headline", "fig29_pair_matrix_margins", "fig30_gloss_three_words"}
 
 
 def esc(text: str) -> str:

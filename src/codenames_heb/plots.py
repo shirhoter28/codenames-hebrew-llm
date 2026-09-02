@@ -1262,7 +1262,7 @@ def _sense_frame(shares, words, models):
 
 
 def gloss_sense_split(shares, words, models, *, title=None, subtitle=None,
-                      font_scale: float = 1.0):
+                      font_scale: float = 1.0, ncols: int = 3):
     """Diverging stacked bars: which sense each model defaults to, per word.
 
     One panel per word, one bar per model. The bar is centred on the midpoint of
@@ -1278,7 +1278,7 @@ def gloss_sense_split(shares, words, models, *, title=None, subtitle=None,
         """A point size, scaled for the caller's output size."""
         return size * font_scale
 
-    ncols = 3
+    ncols = max(1, min(ncols, len(words)))
     nrows = -(-len(words) // ncols)
     # Row height follows the type: at font_scale 2 a two-line model label is
     # twice as tall, and a fixed 0.42in row runs the labels together.
@@ -1372,7 +1372,10 @@ def gloss_sense_split(shares, words, models, *, title=None, subtitle=None,
         fig.text(0.5, y, subtitle, ha="center", va="top", fontsize=fs(8.5),
                  color=GLOSS_INK_2, wrap=True)
         top = 1 - ((0.94 if title else 0.62) / height)
-    fig.tight_layout(rect=(0, 0.045, 1, top))
+    # Reserve the legend's height in inches, not as a fraction: a one-row grid
+    # is little more than half the height of a two-row one, and a fixed 0.045
+    # leaves the legend sitting on top of the axis labels.
+    fig.tight_layout(rect=(0, 0.52 / height, 1, top))
     return fig
 
 
