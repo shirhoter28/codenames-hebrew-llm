@@ -1280,8 +1280,11 @@ def gloss_sense_split(shares, words, models, *, title=None, subtitle=None,
 
     ncols = 3
     nrows = -(-len(words) // ncols)
+    # Row height follows the type: at font_scale 2 a two-line model label is
+    # twice as tall, and a fixed 0.42in row runs the labels together.
+    row_h = 0.42 * max(1.0, font_scale * 0.8)
     fig, axes = plt.subplots(
-        nrows, ncols, figsize=(4.6 * ncols, 0.42 * len(models) * nrows + 1.15 * nrows),
+        nrows, ncols, figsize=(4.6 * ncols, row_h * len(models) * nrows + 1.15 * nrows),
         squeeze=False,
     )
     fig.patch.set_facecolor(GLOSS_SURFACE)
@@ -1330,7 +1333,11 @@ def gloss_sense_split(shares, words, models, *, title=None, subtitle=None,
         ax.set_yticks([-j for j in range(len(models))])
         ax.set_yticklabels(tick_labels, fontsize=fs(7.4), color=GLOSS_INK_2)
         ax.set_xticks([-1, -0.5, 0, 0.5, 1])
-        ax.set_xticklabels(["100%", "50%", "", "50%", "100%"], fontsize=fs(6.4), color=GLOSS_MUTED)
+        # Only the ends are labelled. The axis is symmetric about the midpoint
+        # and the inner marks sit close enough to collide once the type is
+        # scaled for print; the gridlines still carry the 50% positions.
+        ax.set_xticklabels(["100%", "", "", "", "100%"], fontsize=fs(6.4),
+                           color=GLOSS_MUTED)
         ax.set_title(f"{word}      {a_label} ‹ › {b_label}", fontsize=fs(9.5), color=GLOSS_INK,
                      pad=6)
         ax.tick_params(length=0)

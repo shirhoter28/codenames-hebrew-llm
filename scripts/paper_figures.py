@@ -669,10 +669,13 @@ def fig_board_variance(g):
         ax.plot([i - 0.30, i + 0.30], [vals.mean()] * 2, color=SERIES[1], lw=2.6,
                 zorder=5, solid_capstyle="round")
         ax.plot([i, i], [q1, q3], color=SERIES[1], lw=1.2, zorder=4, alpha=0.8)
-        ax.text(i, 1.055, f"mean {vals.mean():.0%}", ha="center", fontsize=fs(9), color=INK)
+        ax.text(i, 1.055, f"mean {vals.mean():.0%}", ha="center", fontsize=fs(8), color=INK)
         ax.text(i, 1.015, f"IQR {q1:.0%}–{q3:.0%}", ha="center", fontsize=fs(8), color=MUTED)
     ax.set_xticks(range(len(STYLE_ORDER)))
-    ax.set_xticklabels([f"{STYLE_LABEL[s]}\n{board_note(done[done.board_style == s])}"
+    # The style name alone: the gloss ("no ambiguity", "a real deal") belongs in
+    # the caption, and repeating it three times under the axis crowds the note
+    # that actually varies.
+    ax.set_xticklabels([f"{s}\n{board_note(done[done.board_style == s])}"
                         for s in STYLE_ORDER], fontsize=fs(8.6), color=INK_2)
     ax.set_ylim(-0.03, 1.12)
     ax.set_yticks([0, .25, .5, .75, 1])
@@ -937,7 +940,10 @@ def fig_gloss(g, r):
             f"English-Pivot rounds on the factorial — {rounds:,} board-word glosses. "
             f"Grey = the model named both senses; a bar short of full width means it "
             f"named neither ({unrel:.0%} overall)."),
-        font_scale=FONT_SCALE,
+        # The gloss chart's own base sizes are smaller than the rest of the set
+        # and it is drawn on a wider canvas, so it needs a further boost to
+        # land at the same size on the page.
+        font_scale=FONT_SCALE * 1.45,
     )
     return fig
 
