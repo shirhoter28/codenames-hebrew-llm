@@ -19,6 +19,34 @@ from codenames_heb.analysis import load_runs
 from scripts.paper_figures import FACTORIAL, english_pair_frame
 
 OUT = Path("docs/paper_figures.tex")
+OUT_HALF = Path("docs/paper_figures_half.tex")
+
+# Half-width pairs: two subfigures side by side in one float. Each entry is
+# (label, overall caption, [(stem, subcaption), (stem, subcaption)]).
+PAIRS = [
+    ("standing", "Where the models stand. (a) each model in each role, averaged over "
+     "every other factor; (b) all 16 codemaster--guesser pairs, with self-play on the "
+     "diagonal. Factorial run, 90 boards.",
+     [("fig01_role_headline", "Performance by role"),
+      ("fig03_pair_matrix", "Every pair")]),
+    ("factors", "The two designed factors, each averaged over the other and over the "
+     "clue-count floor and the guesser. Factorial run.",
+     [("fig21a_method", "Prompt method"),
+      ("fig21b_ambiguity", "Board ambiguity")]),
+    ("factorssubset", "The same two factors for gemini-2.5-flash and gpt-4o-mini in both "
+     "roles, pooled over both runs -- 150 boards behind each ambiguity bar.",
+     [("fig25a_method_subset", "Prompt method"),
+      ("fig25b_ambiguity_subset", "Board ambiguity")]),
+    ("variation", "(a) every board's own win rate, both runs pooled; (b) mean clue "
+     "number by round in the free-choice arm, where no floor is imposed.",
+     [("fig22_board_variance", "Board-to-board variation"),
+      ("fig24_ambition_free", "Clue ambition over a game")]),
+    ("firstguess", "First guess against the chance rate for the pool at that moment. "
+     "(a) all four codemasters on the factorial; (b) the two-model grid on all 450 boards.",
+     [("fig23_first_guess_labeled", "All four codemasters"),
+      ("fig26_first_guess_subset", "Two-model grid")]),
+]
+
 
 # (file stem, label, short caption for the list of figures, full caption)
 FIGURES = [
@@ -157,6 +185,39 @@ PREAMBLE = r"""% ---------------------------------------------------------------
 """
 
 
+def pair_block(label, caption, subs) -> str:
+    parts = ["\\begin{figure}[ht]\n    \\centering\n"]
+    for i, (stem, sub) in enumerate(subs):
+        if i:
+            parts.append("    \\hfill\n")
+        parts.append(
+            "    \\begin{subfigure}{0.48\\linewidth}\n"
+            "        \\centering\n"
+            f"        \\includegraphics[width=\\linewidth]{{figures/{stem}.png}}\n"
+            f"        \\caption{{{sub}}}\n"
+            f"        \\label{{fig:{label}-{'ab'[i]}}}\n"
+            "    \\end{subfigure}\n")
+    parts.append(f"\n    \\caption{{{caption}}}\n    \\label{{fig:{label}}}\n"
+                 "\\end{figure}\n")
+    return "".join(parts)
+
+
+HALF_PREAMBLE = r"""% ---------------------------------------------------------------
+% Half-width subfigure pairs. Needs, in addition to graphicx/booktabs:
+%   \usepackage{subcaption}
+%
+% Upload docs/paper_figures_half/*.png as figures/. That set is drawn on a
+% canvas half as wide as the full-width set, so at 0.48\linewidth its type
+% lands at the same size on the page -- do not mix the two directories.
+%
+% Two figures have no half-width version and stay full width: the pair table
+% (14 columns) and the gloss chart (six panels). Take those from
+% docs/paper_figures_bare/ and paper_figures.tex.
+% ---------------------------------------------------------------
+
+"""
+
+
 def main() -> None:
     data = load_runs([f"results/{FACTORIAL}"])
     frame = english_pair_frame(data.games, data.rounds)
@@ -167,6 +228,13 @@ def main() -> None:
         parts.append("\n")
     OUT.write_text("".join(parts))
     print(f"wrote {OUT} — {len(FIGURES)} figures + 1 table")
+
+    half = [HALF_PREAMBLE]
+    for label, caption, subs in PAIRS:
+        half.append(pair_block(label, caption, subs))
+        half.append("\n")
+    OUT_HALF.write_text("".join(half))
+    print(f"wrote {OUT_HALF} — {len(PAIRS)} subfigure pairs")
 
 
 if __name__ == "__main__":

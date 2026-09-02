@@ -42,6 +42,12 @@ from codenames_heb.palette import (  # noqa: E402
 # lands near 5pt on the page, which is unreadable.
 BARE = False
 FONT_SCALE = 1.0
+# `--half` targets a 0.48\linewidth subfigure. The type does not need to grow
+# again: what matters is the ratio of authored width to printed width, so the
+# canvas is halved and the font scale left alone. Panels laid out in a row are
+# re-stacked into a column, because a 3-inch-wide strip of three panels is not
+# a figure anyone can read.
+HALF = False
 
 
 def fs(size: float) -> float:
@@ -186,7 +192,7 @@ def grouped_panel(ax, groups, series, colors, *, fmt="{:.0%}", title="", ylabel=
         ax.bar(x + off, vals, width=w * 0.9, color=colors[name], zorder=3, label=name)
         for xi, v in zip(x, vals):
             ax.text(xi + off, v + top * 0.02, fmt.format(v), ha="center", va="bottom",
-                    fontsize=fs(7.2), color=INK_2, rotation=label_rot)
+                    fontsize=fs(5.6 if HALF else 7.2), color=INK_2, rotation=label_rot)
     ax.set_xticks(x)
     ax.set_xticklabels(groups, fontsize=fs(8.5), color=INK_2)
     ax.set_ylim(0, top * 1.18)
@@ -203,7 +209,7 @@ def grouped_panel(ax, groups, series, colors, *, fmt="{:.0%}", title="", ylabel=
 
 def fig_role_headline(g):
     done = g[g.outcome.isin(["win", "loss"])]
-    fig, axes = plt.subplots(2, 2, figsize=(9.4, 6.6))
+    fig, axes = plt.subplots(2, 2, figsize=(5.8, 6.4) if HALF else (9.4, 6.6))
     for row, (key, role) in enumerate([("cm", "Codemaster"), ("gs", "Guesser")]):
         order = order_by(done, key, "is_win")
         cols = model_colors(order)
@@ -290,7 +296,8 @@ def fig_pair_matrix(g):
     wins = done[done.is_win == 1]
     ln = np.array([[wins[(wins.cm == r) & (wins.gs == c)].game_length.mean() for c in cols]
                    for r in rows])
-    fig, axes = plt.subplots(1, 2, figsize=(11.2, 4.6))
+    fig, axes = plt.subplots(2, 1, figsize=(5.6, 8.4)) if HALF else \
+        plt.subplots(1, 2, figsize=(11.2, 4.6))
     _heat(axes[0], wr, rows, cols, fmt="{:.0%}", title="Win rate  (darker = better)")
     _heat(axes[1], ln, rows, cols, fmt="{:.1f}", title="Rounds to win  (darker = slower)")
     top = titles(fig, "Every codemaster against every guesser",
@@ -585,7 +592,7 @@ def two_model_subset(g):
     return g[g.cm.isin(SUBSET_MODELS) & g.gs.isin(SUBSET_MODELS)]
 
 
-def fig_factors_separately(g, models=None, *, title=None, subtitle=None):
+def fig_factors_separately(g, models=None, *, title=None, subtitle=None, only=None):
     """Prompt method and board ambiguity side by side — one figure, two graphs.
 
     Each panel averages over *everything* except its own factor and the
@@ -598,14 +605,21 @@ def fig_factors_separately(g, models=None, *, title=None, subtitle=None):
     done = g[g.outcome.isin(["win", "loss"])]
     wins = done[done.is_win == 1]
     cols = model_colors(models)
-    fig, axes = plt.subplots(2, 2, figsize=(11.6, 7.0), sharey="row",
-                             gridspec_kw={"width_ratios": [2, 3]})
+    if only is not None:
+        # One factor, its two measures stacked — a half-width subfigure.
+        fig, axes = plt.subplots(2, 1, figsize=(5.4, 6.6))
+        axes = [[axes[0]], [axes[1]]]
+    else:
+        fig, axes = plt.subplots(2, 2, figsize=(11.6, 7.0), sharey="row",
+                                 gridspec_kw={"width_ratios": [2, 3]})
 
     factors = [
         ("method", ["strong_hebrew", "translate_pipeline"], METHOD_LABEL, "Prompt method"),
         ("board_style", STYLE_ORDER,
          {k: v.splitlines()[0] for k, v in STYLE_LABEL.items()}, "Board ambiguity"),
     ]
+    if only is not None:
+        factors = [f for f in factors if f[0] == only]
     for j, (column, levels, labels, factor_name) in enumerate(factors):
         for i, (frame, metric, fmt, ylabel) in enumerate([
             (done, "is_win", "{:.0%}", "win rate"),
@@ -627,7 +641,8 @@ def fig_factors_separately(g, models=None, *, title=None, subtitle=None):
         for ax in axes[i]:
             ax.set_ylim(0, row_max)
     handles = [Patch(facecolor=cols[m], label=m) for m in models]
-    fig.legend(handles=handles, loc="lower center", ncol=len(models), frameon=False,
+    fig.legend(handles=handles, loc="lower center",
+               ncol=2 if only is not None else len(models), frameon=False,
                fontsize=fs(8.5), labelcolor=INK_2, bbox_to_anchor=(0.5, -0.012))
     top = titles(
         fig,
@@ -635,7 +650,7 @@ def fig_factors_separately(g, models=None, *, title=None, subtitle=None):
         subtitle or "Left: prompt method, pooling all three board styles. Right: board "
         "ambiguity, pooling both prompt methods. Every bar also averages over the "
         "clue-count floor and the guesser.")
-    fig.tight_layout(rect=(0, 0.055, 1, top))
+    fig.tight_layout(rect=(0, 0.11 if only is not None else 0.055, 1, top))
     return fig
 
 
@@ -644,7 +659,7 @@ def fig_board_variance(g):
     done = g[g.outcome.isin(["win", "loss"])]
     per_board = (done.groupby(["board_style", "board_seed"])
                  .agg(win=("is_win", "mean"), n=("is_win", "size")).reset_index())
-    fig, ax = plt.subplots(figsize=(9.0, 5.0))
+    fig, ax = plt.subplots(figsize=(5.6, 5.0) if HALF else (9.0, 5.0))
     rng = np.random.default_rng(0)
     for i, style in enumerate(STYLE_ORDER):
         vals = per_board[per_board.board_style == style]["win"].values
@@ -709,7 +724,10 @@ def fig_length_by_style(g):
 
 
 def _first_guess_panels(g, r, models, title, subtitle):
-    fig, axes = plt.subplots(1, 3, figsize=(12.2, 4.4), sharey=True)
+    if HALF:
+        fig, axes = plt.subplots(3, 1, figsize=(5.4, 10.2), sharey=True)
+    else:
+        fig, axes = plt.subplots(1, 3, figsize=(12.2, 4.4), sharey=True)
     done = g[g.outcome.isin(["win", "loss"])]
     for j, style in enumerate(STYLE_ORDER):
         ax = axes[j]
@@ -742,7 +760,8 @@ def _first_guess_panels(g, r, models, title, subtitle):
     cols = model_colors(models)
     handles = [Patch(facecolor=cols[m], label=f"{m} — observed") for m in models]
     handles.append(Patch(facecolor=BASELINE, label="chance, given the pool at that moment"))
-    fig.legend(handles=handles, loc="lower center", ncol=len(handles), frameon=False,
+    fig.legend(handles=handles, loc="lower center",
+               ncol=2 if HALF else len(handles), frameon=False,
                fontsize=fs(8.5), labelcolor=INK_2, bbox_to_anchor=(0.5, -0.02))
     top = titles(fig, title, subtitle)
     fig.tight_layout(rect=(0, 0.07, 1, top))
@@ -772,7 +791,7 @@ def fig_first_guess_subset(g, r):
 def fig_ambition_free(g, r):
     """Clue ambition over the course of a game, free-choice arm only."""
     free = r[r.count_constraint == "free"]
-    fig, ax = plt.subplots(figsize=(8.4, 4.4))
+    fig, ax = plt.subplots(figsize=(5.6, 4.6) if HALF else (8.4, 4.4))
     cols = model_colors(MODEL_ORDER)
     for m in MODEL_ORDER:
         s = free[free.cm == m]
@@ -969,23 +988,55 @@ RUN_FIGURES = {
 }
 
 
-def main(out_dir: str | None = None, bare: bool = False) -> None:
-    global BARE, FONT_SCALE
-    BARE = bare
-    FONT_SCALE = 1.45 if bare else 1.0
+# Figures that only work across a full text width. The gloss chart is six
+# panels of four bars each, and the pair table is fourteen columns; neither
+# survives being squeezed into half a column, so `--half` skips them and they
+# stay full-width figures in the document.
+HALF_SKIP = {"fig27_pair_table_english", "fig28_gloss_sense_split"}
+
+# In half mode the two-factor figures split into one factor apiece, which is
+# exactly the subfigure pair the layout wants.
+HALF_EXTRA = {
+    "fig21a_method": ("factorial", lambda g, r: fig_factors_separately(g, only="method")),
+    "fig21b_ambiguity": ("factorial",
+                         lambda g, r: fig_factors_separately(g, only="board_style")),
+    "fig25a_method_subset": ("pooled", lambda g, r: fig_factors_separately(
+        two_model_subset(g), SUBSET_MODELS, only="method")),
+    "fig25b_ambiguity_subset": ("pooled", lambda g, r: fig_factors_separately(
+        two_model_subset(g), SUBSET_MODELS, only="board_style")),
+}
+HALF_REPLACED = {"fig21_factors_separately", "fig25_factors_subset"}
+
+
+def main(out_dir: str | None = None, bare: bool = False, half: bool = False) -> None:
+    global BARE, FONT_SCALE, HALF
+    BARE = bare or half
+    HALF = half
+    FONT_SCALE = 1.45 if BARE else 1.0
     plt.rcParams["font.size"] = fs(9)
-    out = Path(out_dir or ("docs/paper_figures_bare" if bare else "docs/paper_figures"))
+    default = ("docs/paper_figures_half" if half else
+               "docs/paper_figures_bare" if bare else "docs/paper_figures")
+    out = Path(out_dir or default)
     out.mkdir(parents=True, exist_ok=True)
     games, rounds = load()
     fac_g, fac_r = games[games.run_id == FACTORIAL], rounds[rounds.run_id == FACTORIAL]
     print(f"pooled {len(games):,} games / factorial {len(fac_g):,} games")
     data = {"pooled": (games, rounds), "factorial": (fac_g, fac_r)}
-    for name, (scope, build) in FIGURES.items():
+    figures = dict(FIGURES)
+    if half:
+        for name in HALF_SKIP | HALF_REPLACED:
+            figures.pop(name, None)
+        figures.update(HALF_EXTRA)
+    for name, (scope, build) in figures.items():
         fig = build(*data[scope])
         path = out / f"{name}.png"
         fig.savefig(path, dpi=200, bbox_inches="tight")
         plt.close(fig)
         print("wrote", path)
+
+    if half:
+        print("skipped (need full width): " + ", ".join(sorted(HALF_SKIP)))
+        return
 
     # The stratified grids, rendered off the factorial run for the same
     # balance reason the pooled figures use it.
@@ -1002,5 +1053,6 @@ def main(out_dir: str | None = None, bare: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if a != "--bare"]
-    main(*args, bare="--bare" in sys.argv[1:])
+    flags = {a for a in sys.argv[1:] if a.startswith("--")}
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    main(*args, bare="--bare" in flags, half="--half" in flags)

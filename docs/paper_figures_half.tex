@@ -1,0 +1,113 @@
+% ---------------------------------------------------------------
+% Half-width subfigure pairs. Needs, in addition to graphicx/booktabs:
+%   \usepackage{subcaption}
+%
+% Upload docs/paper_figures_half/*.png as figures/. That set is drawn on a
+% canvas half as wide as the full-width set, so at 0.48\linewidth its type
+% lands at the same size on the page -- do not mix the two directories.
+%
+% Two figures have no half-width version and stay full width: the pair table
+% (14 columns) and the gloss chart (six panels). Take those from
+% docs/paper_figures_bare/ and paper_figures.tex.
+% ---------------------------------------------------------------
+
+\begin{figure}[ht]
+    \centering
+    \begin{subfigure}{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig01_role_headline.png}
+        \caption{Performance by role}
+        \label{fig:standing-a}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig03_pair_matrix.png}
+        \caption{Every pair}
+        \label{fig:standing-b}
+    \end{subfigure}
+
+    \caption{Where the models stand. (a) each model in each role, averaged over every other factor; (b) all 16 codemaster--guesser pairs, with self-play on the diagonal. Factorial run, 90 boards.}
+    \label{fig:standing}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \begin{subfigure}{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig21a_method.png}
+        \caption{Prompt method}
+        \label{fig:factors-a}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig21b_ambiguity.png}
+        \caption{Board ambiguity}
+        \label{fig:factors-b}
+    \end{subfigure}
+
+    \caption{The two designed factors, each averaged over the other and over the clue-count floor and the guesser. Factorial run.}
+    \label{fig:factors}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \begin{subfigure}{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig25a_method_subset.png}
+        \caption{Prompt method}
+        \label{fig:factorssubset-a}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig25b_ambiguity_subset.png}
+        \caption{Board ambiguity}
+        \label{fig:factorssubset-b}
+    \end{subfigure}
+
+    \caption{The same two factors for gemini-2.5-flash and gpt-4o-mini in both roles, pooled over both runs -- 150 boards behind each ambiguity bar.}
+    \label{fig:factorssubset}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \begin{subfigure}{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig22_board_variance.png}
+        \caption{Board-to-board variation}
+        \label{fig:variation-a}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig24_ambition_free.png}
+        \caption{Clue ambition over a game}
+        \label{fig:variation-b}
+    \end{subfigure}
+
+    \caption{(a) every board's own win rate, both runs pooled; (b) mean clue number by round in the free-choice arm, where no floor is imposed.}
+    \label{fig:variation}
+\end{figure}
+
+\begin{figure}[ht]
+    \centering
+    \begin{subfigure}{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig23_first_guess_labeled.png}
+        \caption{All four codemasters}
+        \label{fig:firstguess-a}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig26_first_guess_subset.png}
+        \caption{Two-model grid}
+        \label{fig:firstguess-b}
+    \end{subfigure}
+
+    \caption{First guess against the chance rate for the pool at that moment. (a) all four codemasters on the factorial; (b) the two-model grid on all 450 boards.}
+    \label{fig:firstguess}
+\end{figure}
+
