@@ -164,14 +164,16 @@ def pct_axis(ax):
     ax.yaxis.set_major_formatter(lambda v, _: f"{v:.0%}")
 
 
-def bar_panel(ax, labels, values, colors, *, fmt="{:.0%}", title="", ylabel="", pad=0.14):
+def bar_panel(ax, labels, values, colors, *, fmt="{:.0%}", title="", ylabel="", pad=0.14,
+              show_labels=True):
     x = np.arange(len(labels))
     ax.bar(x, values, width=0.52, color=colors, zorder=3)
     for xi, v in zip(x, values):
         ax.text(xi, v + max(values) * 0.02, fmt.format(v), ha="center", va="bottom",
                 fontsize=fs(9), color=INK, fontweight="normal")
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=fs(8.5), color=INK_2)
+    ax.set_xticklabels(labels if show_labels else [""] * len(labels),
+                       fontsize=fs(8.5), color=INK_2)
     ax.set_ylim(0, max(values) * (1 + pad))
     ax.set_ylabel(ylabel, fontsize=fs(9))
     ax.set_title(title, fontsize=fs(10), color=INK, loc="left", pad=8)
@@ -209,21 +211,31 @@ def grouped_panel(ax, groups, series, colors, *, fmt="{:.0%}", title="", ylabel=
 
 def fig_role_headline(g):
     done = g[g.outcome.isin(["win", "loss"])]
+    wins = done[done.is_win == 1]
+    # A fixed model order in all four panels, with the model named once in the
+    # legend rather than under every column. Colour and position then both
+    # identify the model, and the four panels can be read against each other
+    # without re-reading four sets of tick labels.
+    models = MODEL_ORDER
+    cols = model_colors(models)
     fig, axes = plt.subplots(2, 2, figsize=(5.8, 6.4) if HALF else (9.4, 6.6))
     for row, (key, role) in enumerate([("cm", "Codemaster"), ("gs", "Guesser")]):
-        order = order_by(done, key, "is_win")
-        cols = model_colors(order)
-        wins = done[done.is_win == 1]
-        wr = [done[done[key] == m].is_win.mean() for m in order]
-        ln = [wins[wins[key] == m].game_length.mean() for m in order]
-        bar_panel(axes[row][0], order, wr, [cols[m] for m in order],
+        wr = [done[done[key] == m].is_win.mean() for m in models]
+        ln = [wins[wins[key] == m].game_length.mean() for m in models]
+        bar_panel(axes[row][0], models, wr, [cols[m] for m in models], show_labels=False,
                   title=f"{role} — win rate", ylabel="share of completed games")
-        bar_panel(axes[row][1], order, ln, [cols[m] for m in order], fmt="{:.1f}",
+        bar_panel(axes[row][1], models, ln, [cols[m] for m in models], fmt="{:.1f}",
+                  show_labels=False,
                   title=f"{role} — rounds to win", ylabel="mean rounds (wins only)")
+    handles = [Patch(facecolor=cols[m], label=m) for m in models]
+    fig.legend(handles=handles, loc="lower center", ncol=2 if HALF else len(models),
+               frameon=False, fontsize=fs(8.5), labelcolor=INK_2,
+               bbox_to_anchor=(0.5, -0.012))
     top = titles(fig, "Model performance in each role",
-           "Pooled over every prompt method, clue-count floor, board style and partner model. "
-           "Rounds-to-win counts only games that were won, so it reads as efficiency.")
-    fig.tight_layout(rect=(0, 0, 1, top))
+                 "Pooled over every prompt method, clue-count floor, board style and "
+                 "partner model. Rounds-to-win counts only games that were won, so it "
+                 "reads as efficiency.")
+    fig.tight_layout(rect=(0, 0.10 if HALF else 0.06, 1, top))
     return fig
 
 
