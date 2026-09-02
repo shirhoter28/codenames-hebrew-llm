@@ -541,9 +541,19 @@ def fig_stopping(g, r):
 SUBSET_MODELS = ["gemini-2.5-flash", "gpt-4o-mini"]
 
 
+def n_boards(df) -> int:
+    """Distinct boards, not distinct seeds.
+
+    A board is `(style, seed)`: the same seed draws different words for each
+    style. Counting seeds alone reports 30 for an arm that actually played all
+    90 boards of the factorial.
+    """
+    return len(df[["board_style", "board_seed"]].drop_duplicates())
+
+
 def board_note(df) -> str:
-    """`30 boards · 933 games` — the denominator behind one column."""
-    return f"{df.board_seed.nunique()} boards · {len(df):,} games"
+    """`90 boards · 4,217 games` — the denominator behind one column."""
+    return f"{n_boards(df)} boards · {len(df):,} games"
 
 
 def two_model_subset(g):
@@ -551,65 +561,90 @@ def two_model_subset(g):
     return g[g.cm.isin(SUBSET_MODELS) & g.gs.isin(SUBSET_MODELS)]
 
 
-def fig_method_style_grid(g):
-    """Prompt method and board ambiguity in one grid (replaces two figures).
+def fig_factors_separately(g, models=None, *, title=None, subtitle=None):
+    """Prompt method and board ambiguity side by side — one figure, two graphs.
 
-    Rows are the two headline measures, columns the three board styles, and
-    each panel holds all four codemasters under both prompt methods — so the
-    method effect, the style effect and the codemaster ordering are all read
-    off one figure, and any interaction between them is visible rather than
-    averaged away.
+    Each panel averages over *everything* except its own factor and the
+    codemaster, so the method bars pool all three board styles and the
+    ambiguity bars pool both methods. Combining the two into a single grid
+    would make every bar a method x style cell instead, which is a different
+    and much thinner quantity.
     """
+    models = models or MODEL_ORDER
     done = g[g.outcome.isin(["win", "loss"])]
     wins = done[done.is_win == 1]
-    models = MODEL_ORDER
     cols = model_colors(models)
-    fig, axes = plt.subplots(2, 3, figsize=(12.4, 7.0), sharey="row")
-    for j, style in enumerate(STYLE_ORDER):
-        sub = done[done.board_style == style]
-        wsub = wins[wins.board_style == style]
-        for i, (frame, metric, fmt, label) in enumerate([
-            (sub, "is_win", "{:.0%}", "win rate"),
-            (wsub, "game_length", "{:.1f}", "rounds to win"),
+    fig, axes = plt.subplots(2, 2, figsize=(11.6, 7.0), sharey="row",
+                             gridspec_kw={"width_ratios": [2, 3]})
+
+    factors = [
+        ("method", ["strong_hebrew", "translate_pipeline"], METHOD_LABEL, "Prompt method"),
+        ("board_style", STYLE_ORDER,
+         {k: v.splitlines()[0] for k, v in STYLE_LABEL.items()}, "Board ambiguity"),
+    ]
+    for j, (column, levels, labels, factor_name) in enumerate(factors):
+        for i, (frame, metric, fmt, ylabel) in enumerate([
+            (done, "is_win", "{:.0%}", "win rate"),
+            (wins, "game_length", "{:.1f}", "rounds to win"),
         ]):
             ax = axes[i][j]
-            x = np.arange(len(models))
-            w = 0.38
-            for k, method in enumerate(["strong_hebrew", "translate_pipeline"]):
-                vals = [frame[(frame.cm == m) & (frame.method == method)][metric].mean()
-                        for m in models]
-                ax.bar(x + (k - 0.5) * w, vals, width=w * 0.88,
-                       color=[cols[m] for m in models], zorder=3,
-                       hatch="" if k == 0 else "///", edgecolor=SURFACE, linewidth=0.8)
-                for xi, v in zip(x, vals):
-                    ax.text(xi + (k - 0.5) * w, v, fmt.format(v), ha="center",
-                            va="bottom", fontsize=6.6, color=INK_2, rotation=90)
-            ax.set_xticks(x)
-            ax.set_xticklabels([m.replace("-instruct", "") for m in models],
-                               fontsize=7.2, color=INK_2, rotation=25, ha="right")
-            if i == 0:
-                ax.set_title(f"{STYLE_LABEL[style].splitlines()[0]}\n{board_note(sub)}",
-                             fontsize=9.5, color=INK, pad=8)
-                pct_axis(ax)
-            if j == 0:
-                ax.set_ylabel(label, fontsize=9)
-            tidy(ax)
-    # Rows share a y-axis, so the headroom for the rotated labels is set once
-    # per row from that row's own maximum rather than per panel.
+            groups = [
+                f"{labels[v]}\n{board_note(done[done[column] == v])}" if i == 0
+                else labels[v]
+                for v in levels
+            ]
+            series = {m: [frame[(frame.cm == m) & (frame[column] == v)][metric].mean()
+                          for v in levels] for m in models}
+            grouped_panel(ax, groups, series, cols, fmt=fmt,
+                          title=factor_name if i == 0 else "",
+                          ylabel=ylabel if j == 0 else "")
     for i in range(2):
         row_max = max(ax.get_ylim()[1] for ax in axes[i])
         for ax in axes[i]:
             ax.set_ylim(0, row_max)
-    handles = [Patch(facecolor=cols[m], label=m) for m in models] + [
-        Patch(facecolor="#dddddd", label="Hebrew-Direct"),
-        Patch(facecolor="#dddddd", hatch="///", label="English-Pivot"),
-    ]
-    fig.legend(handles=handles, loc="lower center", ncol=6, frameon=False, fontsize=8.5,
-               labelcolor=INK_2, bbox_to_anchor=(0.5, -0.012))
-    top = titles(fig, "Prompt method and board ambiguity together",
-                 "Rows: the two headline measures. Columns: board style. Bars: the four "
-                 "codemasters, solid for Hebrew-Direct and hatched for English-Pivot.")
-    fig.tight_layout(rect=(0, 0.06, 1, top))
+    handles = [Patch(facecolor=cols[m], label=m) for m in models]
+    fig.legend(handles=handles, loc="lower center", ncol=len(models), frameon=False,
+               fontsize=8.5, labelcolor=INK_2, bbox_to_anchor=(0.5, -0.012))
+    top = titles(
+        fig,
+        title or "The two designed factors, one panel each",
+        subtitle or "Left: prompt method, pooling all three board styles. Right: board "
+        "ambiguity, pooling both prompt methods. Every bar also averages over the "
+        "clue-count floor and the guesser.")
+    fig.tight_layout(rect=(0, 0.055, 1, top))
+    return fig
+
+
+def fig_board_variance(g):
+    """Every board's own win rate — the spread the whole study sits inside."""
+    done = g[g.outcome.isin(["win", "loss"])]
+    per_board = (done.groupby(["board_style", "board_seed"])
+                 .agg(win=("is_win", "mean"), n=("is_win", "size")).reset_index())
+    fig, ax = plt.subplots(figsize=(9.0, 5.0))
+    rng = np.random.default_rng(0)
+    for i, style in enumerate(STYLE_ORDER):
+        vals = per_board[per_board.board_style == style]["win"].values
+        ax.scatter(np.full(len(vals), i) + rng.normal(0, 0.058, len(vals)), vals,
+                   s=15, alpha=0.42, color=STYLE_RAMP[1], edgecolors="none", zorder=3)
+        q1, med, q3 = np.percentile(vals, [25, 50, 75])
+        ax.plot([i - 0.30, i + 0.30], [vals.mean()] * 2, color=SERIES[1], lw=2.6,
+                zorder=5, solid_capstyle="round")
+        ax.plot([i, i], [q1, q3], color=SERIES[1], lw=1.2, zorder=4, alpha=0.8)
+        ax.text(i, 1.055, f"mean {vals.mean():.0%}", ha="center", fontsize=9, color=INK)
+        ax.text(i, 1.015, f"IQR {q1:.0%}–{q3:.0%}", ha="center", fontsize=8, color=MUTED)
+    ax.set_xticks(range(len(STYLE_ORDER)))
+    ax.set_xticklabels([f"{STYLE_LABEL[s]}\n{board_note(done[done.board_style == s])}"
+                        for s in STYLE_ORDER], fontsize=8.6, color=INK_2)
+    ax.set_ylim(-0.03, 1.12)
+    ax.set_yticks([0, .25, .5, .75, 1])
+    ax.set_ylabel("win rate on that board", fontsize=9)
+    pct_axis(ax)
+    tidy(ax)
+    top = titles(fig, "Board-to-board variation dwarfs every model effect",
+                 "One dot per board: its win rate over every game any pair played on it. "
+                 "The thick bar is the style mean, the thin line its interquartile range. "
+                 "Both runs pooled.")
+    fig.tight_layout(rect=(0, 0, 1, top))
     return fig
 
 
@@ -678,10 +713,13 @@ def _first_guess_panels(g, r, models, title, subtitle):
         ax.set_ylim(0, 0.86)
         tidy(ax)
     axes[0].set_ylabel("share of first guesses on a target", fontsize=9)
-    handles = [Patch(facecolor=SERIES[0], label="observed first guess"),
-               Patch(facecolor=BASELINE, label="chance, given the pool at that moment")]
-    fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False, fontsize=8.5,
-               labelcolor=INK_2, bbox_to_anchor=(0.5, -0.02))
+    # The coloured bars carry model identity, so the legend has to name the
+    # models — a single "observed" swatch would assert a colour no bar uses.
+    cols = model_colors(models)
+    handles = [Patch(facecolor=cols[m], label=f"{m} — observed") for m in models]
+    handles.append(Patch(facecolor=BASELINE, label="chance, given the pool at that moment"))
+    fig.legend(handles=handles, loc="lower center", ncol=len(handles), frameon=False,
+               fontsize=8.5, labelcolor=INK_2, bbox_to_anchor=(0.5, -0.02))
     top = titles(fig, title, subtitle)
     fig.tight_layout(rect=(0, 0.07, 1, top))
     return fig
@@ -873,11 +911,16 @@ FIGURES = {
     "fig10_trajectory": ("factorial", fig_trajectory),
     "fig11_stopping": ("factorial", fig_stopping),
     # The selected set.
-    "fig21_method_style_grid": ("factorial", lambda g, r: fig_method_style_grid(g)),
-    "fig22_length_by_style": ("pooled", lambda g, r: fig_length_by_style(g)),
+    "fig21_factors_separately": ("factorial", lambda g, r: fig_factors_separately(g)),
+    "fig22_board_variance": ("pooled", lambda g, r: fig_board_variance(g)),
     "fig23_first_guess_labeled": ("factorial", fig_first_guess_labeled),
     "fig24_ambition_free": ("factorial", fig_ambition_free),
-    "fig25_outcome_mix_subset": ("pooled", lambda g, r: fig_outcome_mix_subset(g)),
+    "fig25_factors_subset": ("pooled", lambda g, r: fig_factors_separately(
+        two_model_subset(g), SUBSET_MODELS,
+        title="The two designed factors — the two-model grid on all 450 boards",
+        subtitle="The same two panels as Figure 4, for gemini-2.5-flash and gpt-4o-mini "
+                 "in both roles, pooled over both runs. Five times the boards behind each "
+                 "ambiguity bar.")),
     "fig26_first_guess_subset": ("pooled", fig_first_guess_subset),
     "fig27_pair_table_english": ("factorial", fig_pair_table_english),
     "fig28_gloss_sense_split": ("factorial", fig_gloss),
