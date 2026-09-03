@@ -1,0 +1,6 @@
+# Board construction is stdlib-only (csv, random, unittest).
+# pandas is only used by notebooks.
+pandas
+matplotlib
+# Word2Vec / fastText load and cosine similarity (codenames/embeddings.py)
+gensim

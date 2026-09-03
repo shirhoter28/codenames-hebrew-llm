@@ -1,0 +1,4 @@
+# Pretrained vector tables are large; keep only the README.
+*
+!.gitignore
+!README.md

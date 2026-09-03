@@ -1,0 +1,4 @@
+# Experiment run outputs (JSON / JSONL). Keep this directory.
+*.json
+*.jsonl
+! .gitkeep
