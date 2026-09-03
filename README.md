@@ -111,6 +111,9 @@ scripts/               command-line entry points: run, report, figures, replay
 results/<run_id>/      per-run config, boards, metrics, figures and report
 tests/                 pytest, mirroring src/codenames_heb/
 docs/                  figures and worked example games
+embedding/             the word-embedding arm of the project: a codemaster
+                       and guesser driven by Hebrew FastText vectors, with
+                       its own package, tests, scripts and word pools
 ```
 
 ### A note on `results/`
@@ -123,6 +126,17 @@ ambition, stopping behaviour, intended-vs-hit overlap) is derived from
 `raw.jsonl` by `src/codenames_heb/analysis.py`. With them in the repo, a clone
 can rebuild every number and figure in the report offline, without an API key
 and without spending a cent.
+
+## The embedding arm
+
+`embedding/` is a self-contained second study: instead of prompting an LLM, the
+codemaster and guesser pick clues and guesses from similarities in a Hebrew
+word-embedding space. It has its own `README.md`, `requirements.txt` and test
+suite, and runs independently of the LLM pipeline above.
+
+Its pretrained vectors are not in the repo — `wiki.he.vec` is 1.2 GB and
+`model.bin` 264 MB, both far past what GitHub accepts. See
+`embedding/data/embeddings/README.md` for how to fetch them.
 
 ## Reference
 
