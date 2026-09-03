@@ -1,0 +1,16 @@
+{
+  "max_workers": 2,
+  "guesser_models": [
+    "google/gemini-2.5-flash",
+    "openai/gpt-4o-mini"
+  ],
+  "count_constraints": [
+    2
+  ],
+  "board_seeds": [
+    30,
+    149
+  ],
+  "n_pairs": 4,
+  "dispatch": "latin_square"
+}

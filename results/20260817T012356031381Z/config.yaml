@@ -1,0 +1,60 @@
+# M2 TOURNAMENT: the ambiguity ladder at a size that can actually resolve it.
+#
+# Same design as `m2_board_styles_fixed_guesser.yaml` — one neutral Guesser held
+# constant so a model-to-model difference is attributable to *Codemaster* skill —
+# but sized from the 2026-08-16 pilot's own variance rather than guessed at.
+#
+# WHY n_boards: 10
+#
+# `analysis.comparison_power()` on run 20260816T035609664719Z, for the
+# model comparison (collapsing method and style), minimum detectable difference
+# at alpha=0.05 / 80% power:
+#
+#   games/cell   mdd_win_rate   mdd_first_guess_lift
+#            5          0.325                  0.142
+#           10          0.230                  0.100
+#           20          0.162                  0.071
+#
+# The outcome variable this run is powered for is FIRST-GUESS LIFT, not win
+# rate. On the pilot, lift spreads the four models across 0.514 / 0.383 / 0.283
+# / 0.142 — a closest-adjacent-pair gap of 0.100 — while win rate spreads them
+# across 0.650 / 0.600 / 0.425 / 0.382, where the closest pair differs by 0.043.
+#
+# So n_boards: 10 resolves every adjacent model pair on lift. Resolving the
+# closest pair on WIN RATE would need roughly 20x this run and is not worth
+# buying: win rate is a coarse read on codemaster skill because a game is won or
+# lost by a chain of ~9 guesses, while lift scores the one guess each clue is
+# most directly responsible for.
+#
+# 4 models x 2 methods x 4 styles x 10 boards x 1 trial = 320 games, ~8.5k
+# OpenRouter calls at the pilot's observed 26.5 calls/game.
+#
+# WHY max_workers: 4
+#
+# Capped at the number of models by `load_config`, and that cap is the point:
+# tasks are dispatched round-robin by model, so the 4 games in flight sit behind
+# 4 different providers. Per-provider request rate is therefore unchanged from a
+# sequential run even though throughput is ~4x. Raising this above the model
+# count would concentrate concurrent requests on one provider — the pattern that
+# killed a 180-game run with HTTP 429 (DECISIONS.md, 2026-08-10).
+#
+# Check `duration_s` in the results against `run_meta.json`'s max_workers when
+# this finishes: inflated durations with flat rejection counts mean the provider
+# throttled, which otherwise reads as the model being non-compliant.
+models:
+  - meta-llama/llama-3.3-70b-instruct
+  - qwen/qwen3.5-9b
+  - openai/gpt-4o-mini
+  - google/gemini-2.5-flash
+codemaster_prompt_methods:
+  - strong_hebrew
+  - translate_pipeline
+guesser_model: anthropic/claude-haiku-4.5
+board_styles:
+  - dual_0
+  - dual_50
+  - dual_80
+  - dual_100
+n_boards: 10
+n_trials: 1
+max_workers: 4

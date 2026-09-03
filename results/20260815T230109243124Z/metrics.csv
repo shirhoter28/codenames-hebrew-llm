@@ -1,0 +1,25 @@
+model,method,board_seed,trial,status,stage,outcome,game_length,targets_found,target_recovery_rate,assassin_hit,error
+meta-llama/llama-3.3-70b-instruct,strong_hebrew,0,0,ok,,loss,9,5,0.5555555555555556,True,
+meta-llama/llama-3.3-70b-instruct,strong_hebrew,1,0,format_failure,guesser,,,,,,Guesser meta-llama/llama-3.3-70b-instruct failed after 3 attempts: guess 'סרט' not among currently guessable words
+meta-llama/llama-3.3-70b-instruct,strong_hebrew,2,0,format_failure,guesser,,,,,,Guesser meta-llama/llama-3.3-70b-instruct failed after 3 attempts: guess 'מנהיג' not among currently guessable words
+meta-llama/llama-3.3-70b-instruct,strong_hebrew,3,0,format_failure,guesser,,,,,,Guesser meta-llama/llama-3.3-70b-instruct failed after 3 attempts: guess 'רוח' not among currently guessable words
+meta-llama/llama-3.3-70b-instruct,translate_pipeline,0,0,ok,,loss,2,1,0.1111111111111111,True,
+meta-llama/llama-3.3-70b-instruct,translate_pipeline,1,0,format_failure,guesser,,,,,,Guesser meta-llama/llama-3.3-70b-instruct failed after 3 attempts: guess 'סרט' not among currently guessable words
+meta-llama/llama-3.3-70b-instruct,translate_pipeline,2,0,ok,,loss,4,2,0.2222222222222222,True,
+meta-llama/llama-3.3-70b-instruct,translate_pipeline,3,0,format_failure,codemaster,,,,,,Codemaster meta-llama/llama-3.3-70b-instruct/translate_pipeline failed after 3 attempts: Model meta-llama/llama-3.3-70b-instruct failed to produce valid JSON after 1 attempts: Could not parse JSON: Invalid \uXXXX escape: line 1 column 1961 (char 1960)
+qwen/qwen3.5-9b,strong_hebrew,0,0,format_failure,codemaster,,,,,,Codemaster qwen/qwen3.5-9b/strong_hebrew failed after 3 attempts: Model qwen/qwen3.5-9b failed to produce valid JSON after 1 attempts: Could not parse JSON: Invalid control character at: line 5 column 767 (char 840)
+qwen/qwen3.5-9b,strong_hebrew,1,0,ok,,loss,2,1,0.1111111111111111,True,
+qwen/qwen3.5-9b,strong_hebrew,2,0,ok,,loss,2,1,0.1111111111111111,True,
+qwen/qwen3.5-9b,strong_hebrew,3,0,format_failure,codemaster,,,,,,"Codemaster qwen/qwen3.5-9b/strong_hebrew failed after 3 attempts: Model qwen/qwen3.5-9b failed to produce valid JSON after 1 attempts: Could not parse JSON: Expecting ',' delimiter: line 1 column 278 (char 277)"
+qwen/qwen3.5-9b,translate_pipeline,0,0,format_failure,codemaster,,,,,,Codemaster qwen/qwen3.5-9b/translate_pipeline failed after 3 attempts: Model qwen/qwen3.5-9b failed to produce valid JSON after 1 attempts: Could not parse JSON: Unterminated string starting at: line 5 column 14 (char 85)
+qwen/qwen3.5-9b,translate_pipeline,1,0,format_failure,codemaster,,,,,,"Codemaster qwen/qwen3.5-9b/translate_pipeline failed after 3 attempts: clue 'דבר, 2' must be a single word"
+qwen/qwen3.5-9b,translate_pipeline,2,0,ok,,loss,2,0,0.0,True,
+qwen/qwen3.5-9b,translate_pipeline,3,0,format_failure,codemaster,,,,,,Codemaster qwen/qwen3.5-9b/translate_pipeline failed after 3 attempts: intended_targets not on board: ['מצנח']
+openai/gpt-4o-mini,strong_hebrew,0,0,ok,,loss,9,6,0.6666666666666666,True,
+openai/gpt-4o-mini,strong_hebrew,1,0,format_failure,codemaster,,,,,,Codemaster openai/gpt-4o-mini/strong_hebrew failed after 3 attempts: clue 'ים' must not be a word already on the board
+openai/gpt-4o-mini,strong_hebrew,2,0,format_failure,guesser,,,,,,Guesser meta-llama/llama-3.3-70b-instruct failed after 3 attempts: guess 'גיבור' not among currently guessable words
+openai/gpt-4o-mini,strong_hebrew,3,0,ok,,loss,2,1,0.1111111111111111,True,
+openai/gpt-4o-mini,translate_pipeline,0,0,format_failure,codemaster,,,,,,Codemaster openai/gpt-4o-mini/translate_pipeline failed after 3 attempts: clue 'חבר' must not be a word already on the board
+openai/gpt-4o-mini,translate_pipeline,1,0,format_failure,codemaster,,,,,,Codemaster openai/gpt-4o-mini/translate_pipeline failed after 3 attempts: clue 'ים' must not be a word already on the board
+openai/gpt-4o-mini,translate_pipeline,2,0,ok,,loss,8,5,0.5555555555555556,True,
+openai/gpt-4o-mini,translate_pipeline,3,0,format_failure,codemaster,,,,,,Codemaster openai/gpt-4o-mini/translate_pipeline failed after 3 attempts: clue 'בוקר' must not be a word already on the board

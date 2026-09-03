@@ -1,0 +1,17 @@
+{
+  "max_workers": 4,
+  "guesser_models": [
+    "google/gemini-2.5-flash"
+  ],
+  "count_constraints": [
+    null,
+    2,
+    3
+  ],
+  "board_seeds": [
+    0,
+    0
+  ],
+  "n_pairs": 4,
+  "dispatch": "latin_square"
+}

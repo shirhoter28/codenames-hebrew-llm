@@ -5,8 +5,15 @@ __pycache__/
 venv/
 .pytest_cache/
 .ipynb_checkpoints/
-results/*/
-!results/.gitkeep
+
+# Run directories are committed whole: the analysis derives every round-level
+# figure from raw.jsonl, so a clone without it cannot rebuild the report.
+# Excluded here are only superseded snapshots of one run's log, kept locally
+# while its failed calls were being replayed.
+results/*/raw.with_402_errors.jsonl
+results/*/raw.with_403_errors.jsonl
+results/*/raw.pre_translate_fix.jsonl
+
 .DS_Store
 .superpowers/
 .claude/

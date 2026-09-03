@@ -1,0 +1,47 @@
+# M2 OVERNIGHT: ambiguity ladder with a NEUTRAL fixed Guesser.
+#
+# Same design as `configs/m2_board_styles_fixed_guesser.yaml` — one Guesser
+# held constant so a model-to-model difference is attributable to *Codemaster*
+# skill, the project's primary research question — but the Guesser is
+# `anthropic/claude-haiku-4.5` instead of llama-3.3-70b, for two reasons
+# established by the 2026-08-16 preflight:
+#
+# 1. NEUTRALITY. llama-3.3-70b is itself one of the four Codemasters under
+#    test, so using it as the measuring instrument invites a home-field
+#    objection. claude-haiku-4.5 is not in the Codemaster set, and is a
+#    different vendor from all four (Meta / Qwen / OpenAI / Google).
+#
+# 2. THE STOP MECHANIC. llama-as-Guesser voluntarily stopped 0 times in 198
+#    rounds: 47.5% of rounds ended hit_opponent, 36.4% hit_civilian, 10.1%
+#    hit_assassin, 6.1% all_correct, 0.0% stopped_early. It always guesses
+#    until it hits something wrong, which is why that run was 20 losses to 2
+#    wins. Near-universal losses compress the primary outcome variable and
+#    cost discrimination between Codemasters. This persisted even with the
+#    "budget is a ceiling, not a quota" prompt. On identical hard scenarios
+#    (18-22 of 25 words revealed) claude-haiku-4.5 matched llama at 100%
+#    per-call compliance while actually using the stop option.
+#
+# Caveat on record: the stop-rate evidence is 8 scenarios per candidate and is
+# noisy; the 0/198 figure for llama is the solid one. haiku's real-game stop
+# rate is unproven at scale, though it produced valid, legal responses on all
+# 20 preflight calls. Switching also breaks continuity with earlier pilot
+# data, which all used llama as Guesser.
+#
+# Scale: 4 models x 2 methods x 4 styles x 5 boards x 1 trial = 160 games.
+# At the measured 153.6 s/game that is ~6.8h and ~$0.70.
+models:
+  - meta-llama/llama-3.3-70b-instruct
+  - qwen/qwen3.5-9b
+  - openai/gpt-4o-mini
+  - google/gemini-2.5-flash
+codemaster_prompt_methods:
+  - strong_hebrew
+  - translate_pipeline
+guesser_model: anthropic/claude-haiku-4.5
+board_styles:
+  - dual_0
+  - dual_50
+  - dual_80
+  - dual_100
+n_boards: 5
+n_trials: 1

@@ -1,0 +1,50 @@
+# M4 SMOKE TEST: the count-constraint axis and the reordered translate prompt,
+# before committing ~91 hours to the full design.
+#
+# 4 codemasters x 1 fixed guesser x 2 methods x 3 count constraints x 1 board
+#   = 24 games, ~15 min at 4 workers, ~$0.10.
+#
+# The guesser is held fixed because nothing in this change touches the guesser;
+# crossing it would quadruple the smoke for no new information.
+#
+# WHAT TO CHECK BEFORE LAUNCHING THE FULL RUN
+#
+#   1. THE HEADLINE RISK — `codemaster_compliance_rate` split by
+#      `count_constraint`. Only 10% of rounds on the 08-19 grid used count >= 3
+#      voluntarily, so `min3` pushes every model far outside its normal
+#      behaviour. Free-choice compliance on 08-19 was gemini 0.98 / llama 0.94 /
+#      gpt-4o-mini 0.99 / qwen 0.54. If `min3` drops those materially, the run
+#      makes more calls than budgeted and the 91 h estimate needs revisiting.
+#   2. `rejection_reasons` should contain `count_below_floor` under min2/min3 and
+#      NOT under free. Its absence everywhere would mean the floor never reached
+#      the model; its presence under `free` would mean a floor leaked in.
+#   3. No `codemaster_failure` outcomes. One would mean a model cannot satisfy
+#      the floor even with the endgame cap, which is the failure mode the cap
+#      exists to prevent.
+#   4. `required_count` on late rounds of min3 games should show values BELOW 3
+#      — that is the endgame cap working. If it is 3 on every round, the cap is
+#      not firing and the endgame will be unsatisfiable at scale.
+#   5. `translate_pipeline` rows must carry non-null `translation_map` /
+#      `en_clue` / `en_targets`. The JSON key order changed on 2026-08-23 so the
+#      translation is emitted before the clue; if parsing broke, it broke here.
+#   6. No `finish_reason: length`. The reordered translate prompt puts the
+#      25-word translation_map first, so the response is longer before it
+#      reaches the clue — the 1024 max_tokens budget has to still fit it.
+models:
+  - google/gemini-2.5-flash
+  - meta-llama/llama-3.3-70b-instruct
+  - openai/gpt-4o-mini
+  - qwen/qwen3.5-9b
+guesser_model: google/gemini-2.5-flash
+codemaster_prompt_methods:
+  - strong_hebrew
+  - translate_pipeline
+count_constraints:
+  - null
+  - 2
+  - 3
+board_styles:
+  - dual_50
+n_boards: 1
+n_trials: 1
+max_workers: 4

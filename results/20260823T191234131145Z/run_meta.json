@@ -1,0 +1,20 @@
+{
+  "max_workers": 4,
+  "guesser_models": [
+    "google/gemini-2.5-flash",
+    "meta-llama/llama-3.3-70b-instruct",
+    "openai/gpt-4o-mini",
+    "qwen/qwen3.5-9b"
+  ],
+  "count_constraints": [
+    null,
+    2,
+    3
+  ],
+  "board_seeds": [
+    0,
+    29
+  ],
+  "n_pairs": 16,
+  "dispatch": "latin_square"
+}

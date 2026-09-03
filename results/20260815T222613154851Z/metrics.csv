@@ -1,0 +1,7 @@
+model,method,board_seed,trial,status,stage,outcome,game_length,targets_found,target_recovery_rate,assassin_hit,error
+meta-llama/llama-3.3-70b-instruct,strong_hebrew,0,0,ok,,win,6,9,1.0,False,
+meta-llama/llama-3.3-70b-instruct,translate_pipeline,0,0,ok,,loss,7,3,0.3333333333333333,True,
+qwen/qwen3.5-9b,strong_hebrew,0,0,format_failure,codemaster,,,,,,Codemaster qwen/qwen3.5-9b/strong_hebrew failed after 3 attempts: Model qwen/qwen3.5-9b failed to produce valid JSON after 1 attempts: Could not parse JSON: Expecting value: line 11 column 3 (char 125)
+qwen/qwen3.5-9b,translate_pipeline,0,0,format_failure,guesser,,,,,,Guesser meta-llama/llama-3.3-70b-instruct failed after 3 attempts: guess 'מגע' not among currently guessable words
+openai/gpt-4o-mini,strong_hebrew,0,0,format_failure,codemaster,,,,,,Codemaster openai/gpt-4o-mini/strong_hebrew failed after 3 attempts: clue 'טבע' must not be a word already on the board
+openai/gpt-4o-mini,translate_pipeline,0,0,ok,,loss,10,7,0.7777777777777778,True,

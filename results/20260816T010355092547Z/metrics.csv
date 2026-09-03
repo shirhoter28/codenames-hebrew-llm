@@ -1,0 +1,25 @@
+model,method,board_seed,trial,status,stage,outcome,game_length,targets_found,target_recovery_rate,assassin_hit,error
+meta-llama/llama-3.3-70b-instruct,strong_hebrew,0,0,ok,,loss,7,5,0.5555555555555556,True,
+meta-llama/llama-3.3-70b-instruct,strong_hebrew,1,0,ok,,loss,11,9,1.0,True,
+meta-llama/llama-3.3-70b-instruct,strong_hebrew,2,0,ok,,loss,13,7,0.7777777777777778,True,
+meta-llama/llama-3.3-70b-instruct,strong_hebrew,3,0,format_failure,guesser,,,,,,Guesser meta-llama/llama-3.3-70b-instruct failed after 3 attempts: guess 'רוח' not among currently guessable words
+meta-llama/llama-3.3-70b-instruct,translate_pipeline,0,0,format_failure,guesser,,,,,,Guesser meta-llama/llama-3.3-70b-instruct failed after 3 attempts: guess 'ראש' not among currently guessable words
+meta-llama/llama-3.3-70b-instruct,translate_pipeline,1,0,format_failure,guesser,,,,,,Guesser meta-llama/llama-3.3-70b-instruct failed after 3 attempts: guess 'סרט' not among currently guessable words
+meta-llama/llama-3.3-70b-instruct,translate_pipeline,2,0,ok,,loss,2,1,0.1111111111111111,True,
+meta-llama/llama-3.3-70b-instruct,translate_pipeline,3,0,format_failure,codemaster,,,,,,Codemaster meta-llama/llama-3.3-70b-instruct/translate_pipeline failed after 3 attempts: Model meta-llama/llama-3.3-70b-instruct failed to produce valid JSON after 1 attempts: Could not parse JSON: Invalid \uXXXX escape: line 1 column 1923 (char 1922)
+qwen/qwen3.5-9b,strong_hebrew,0,0,ok,,loss,10,7,0.7777777777777778,True,
+qwen/qwen3.5-9b,strong_hebrew,1,0,format_failure,guesser,,,,,,Guesser meta-llama/llama-3.3-70b-instruct failed after 3 attempts: guess 'חוק' not among currently guessable words
+qwen/qwen3.5-9b,strong_hebrew,2,0,format_failure,codemaster,,,,,,Codemaster qwen/qwen3.5-9b/strong_hebrew failed after 3 attempts: Model qwen/qwen3.5-9b failed to produce valid JSON after 1 attempts: Could not parse JSON: Expecting value: line 17 column 15 (char 212)
+qwen/qwen3.5-9b,strong_hebrew,3,0,format_failure,codemaster,,,,,,Codemaster qwen/qwen3.5-9b/strong_hebrew failed after 3 attempts: clue 'כוכב' must not be a word already on the board
+qwen/qwen3.5-9b,translate_pipeline,0,0,format_failure,codemaster,,,,,,Codemaster qwen/qwen3.5-9b/translate_pipeline failed after 3 attempts: clue 'פחד' must not be a word already on the board
+qwen/qwen3.5-9b,translate_pipeline,1,0,format_failure,codemaster,,,,,,Codemaster qwen/qwen3.5-9b/translate_pipeline failed after 3 attempts: clue 'מלחמה' must not be a word already on the board
+qwen/qwen3.5-9b,translate_pipeline,2,0,format_failure,codemaster,,,,,,Codemaster qwen/qwen3.5-9b/translate_pipeline failed after 3 attempts: clue 'עמוד' must not be a word already on the board
+qwen/qwen3.5-9b,translate_pipeline,3,0,format_failure,guesser,,,,,,Guesser meta-llama/llama-3.3-70b-instruct failed after 3 attempts: guess 'סרט' not among currently guessable words
+openai/gpt-4o-mini,strong_hebrew,0,0,ok,,loss,11,6,0.6666666666666666,True,
+openai/gpt-4o-mini,strong_hebrew,1,0,format_failure,codemaster,,,,,,Codemaster openai/gpt-4o-mini/strong_hebrew failed after 3 attempts: clue 'ים' must not be a word already on the board
+openai/gpt-4o-mini,strong_hebrew,2,0,format_failure,codemaster,,,,,,Codemaster openai/gpt-4o-mini/strong_hebrew failed after 3 attempts: intended_targets not on board: ['נתיב']
+openai/gpt-4o-mini,strong_hebrew,3,0,format_failure,guesser,,,,,,Guesser meta-llama/llama-3.3-70b-instruct failed after 3 attempts: guess 'חגיגה' not among currently guessable words
+openai/gpt-4o-mini,translate_pipeline,0,0,ok,,loss,12,9,1.0,True,
+openai/gpt-4o-mini,translate_pipeline,1,0,ok,,win,8,9,1.0,False,
+openai/gpt-4o-mini,translate_pipeline,2,0,ok,,loss,7,9,1.0,True,
+openai/gpt-4o-mini,translate_pipeline,3,0,ok,,loss,9,7,0.7777777777777778,True,
