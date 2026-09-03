@@ -2,7 +2,7 @@
 
 NLP final project — Sharon & Shir.
 
-This repository holds the code, data, run artifacts and report for a study of
+This repository holds the code, data and run artifacts for a study of
 how well large language models play [Codenames](https://en.wikipedia.org/wiki/Codenames_(board_game))
 **in Hebrew**. Models play both seats: the **codemaster**, who sees the key and
 gives a one-word clue with a number, and the **guesser**, who sees only the
@@ -10,8 +10,8 @@ board and the clue. The design follows the English-language benchmark of
 Stephenson, Sidji & Ronval, *"Codenames as a Benchmark for Large Language
 Models"*, and asks what changes when the board is Hebrew.
 
-The final report is [`paper.md`](paper.md). The reasoning behind each design
-decision, including the dead ends, lives in [`DECISIONS.md`](DECISIONS.md).
+This repository is the code and data half of the project; the written report is
+submitted separately.
 
 ## What the experiment varies
 
@@ -85,8 +85,9 @@ python scripts/paper_figures.py     # figures as they appear in the report
 python scripts/show_game.py results/<run_id> --help   # replay a single game
 ```
 
-`notebooks/analysis.ipynb` is for exploration only; all reusable logic lives in
-the package.
+All reusable logic lives in the package rather than in scratch analysis, so a
+figure in the report and a figure regenerated from a clone come from the same
+code path.
 
 ## Tests
 
@@ -109,9 +110,7 @@ data/raw/              Hebrew word lists, split into regular and dual
 scripts/               command-line entry points: run, report, figures, replay
 results/<run_id>/      per-run config, boards, metrics, figures and report
 tests/                 pytest, mirroring src/codenames_heb/
-docs/                  proposal, milestone specs, figures, worked examples
-paper.md               the final report
-DECISIONS.md           decision log with rationale
+docs/                  figures and worked example games
 ```
 
 ### A note on `results/`
@@ -122,7 +121,7 @@ transcripts are the ones that matter for reproducibility: `metrics.csv` carries
 only game-level fields, so every round-level result in the report (clue
 ambition, stopping behaviour, intended-vs-hit overlap) is derived from
 `raw.jsonl` by `src/codenames_heb/analysis.py`. With them in the repo, a clone
-can rebuild every number and figure in `paper.md` offline, without an API key
+can rebuild every number and figure in the report offline, without an API key
 and without spending a cent.
 
 ## Reference
